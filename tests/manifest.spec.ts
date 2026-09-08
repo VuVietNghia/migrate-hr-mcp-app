@@ -21,4 +21,16 @@ describe('manifest', () => {
     expect(report.canonicalManifestHash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(report.publisherPermissionDeclarationHash).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
+
+  // Regression coverage for the "Error: No UI resource available" / JSON-RPC -32602 incident
+  // (2026-09-08): `name` was renamed three times without updating `tools[*].ui.resourceUri`
+  // alongside it, and neither `manifest:lint` nor `npm run build` catches that drift — this is
+  // a static assertion so it fails at `npm test` speed, without waiting on a `vite build`.
+  it('keeps every declared UI resourceUri host equal to the manifest name', () => {
+    const uiTools = (publisherManifest.tools as { ui?: { resourceUri?: string } }[]).filter((tool) => tool.ui?.resourceUri);
+    expect(uiTools.length).toBeGreaterThan(0);
+    for (const tool of uiTools) {
+      expect(new URL(tool.ui!.resourceUri!).host).toBe(publisherManifest.name);
+    }
+  });
 });

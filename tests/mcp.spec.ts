@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { handleMcpMessage } from '../src/mcp-message-handlers';
+import publisherManifest from '../privos-app.json';
 
 describe('JSON-RPC handlers', () => {
   afterEach(() => {
@@ -90,6 +91,30 @@ describe('JSON-RPC handlers', () => {
       provenance: 'user-token',
     });
   });
+  // Reproduces the 2026-09-08 incident directly: after `name` changes, the Hub keeps sending
+  // `resources/read` for whatever `ui://<old-name>/form.html` it registered at the last pairing,
+  // while this handler now computes UI_RESOURCE_URI from the CURRENT `name`. The two diverge and
+  // the Hub-visible symptom is "Error: No UI resource available" — this locks the handler's own
+  // contract for that mismatch: a loud, specific JSON-RPC -32602, never a silent fallback.
+  it('rejects a stale ui:// resourceUri (simulating a Hub still on a previous app id) with -32602', async () => {
+    const staleUri = 'ui://ai.privos.mcp-app-demo-previous-name/form.html';
+    const rejected = await handleMcpMessage('resources/read', 20, { uri: staleUri }).catch(
+      (err: Error & { code?: number }) => err,
+    );
+    expect(rejected).toBeInstanceOf(Error);
+    expect((rejected as Error & { code?: number }).code).toBe(-32602);
+    expect((rejected as Error).message).toContain(staleUri);
+  });
+
+  it('serves resources/read for the current, correctly-derived resourceUri', async () => {
+    const currentUri = (publisherManifest.tools as { ui?: { resourceUri?: string } }[]).find(
+      (tool) => tool.ui?.resourceUri,
+    )!.ui!.resourceUri!;
+    const ok = await handleMcpMessage('resources/read', 21, { uri: currentUri });
+    expect(ok.contents[0].mimeType).toBe('text/html;profile=mcp-app');
+    expect(typeof ok.contents[0].text).toBe('string');
+  });
+
   it('calls the licensed tool on Pro', async () => {
     process.env.PRIVOS_APP_LICENSE = '{"tier":"pro","state":"active"}';
     const result = await handleMcpMessage('tools/call', 3, {
