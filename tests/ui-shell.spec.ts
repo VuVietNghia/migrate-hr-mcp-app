@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createElement } from 'react';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -19,9 +18,21 @@ const ASSET_URI_PREFIX = `${UI_RESOURCE_URI.slice(0, UI_RESOURCE_URI.lastIndexOf
 // contract cannot assume `dist/ui` already exists — build it here first, the same way
 // packaging.spec.ts self-invokes its own script instead of assuming prior pipeline steps ran.
 beforeAll(() => {
-  const result = spawnSync(path.resolve('node_modules/.bin/vite'), ['build'], { encoding: 'utf8' });
-  if (result.status !== 0) {
-    throw new Error(`vite build failed ahead of the UI shell tests:\n${result.stdout}\n${result.stderr}`);
+  // `node_modules/.bin/vite` is an extensionless shell script — spawnSync cannot execute it on
+  // Windows. Call vite's JS entry with the node binary already running the tests: works on every OS.
+  // vitest sets NODE_ENV=test, and Vite keys minification off it: a test-mode build emits
+  // DIFFERENT content hashes than `npm run build` and, with emptyOutDir, replaces dist/ui with
+  // them. The Hub serves UI assets from a snapshot of the production filenames, so letting a
+  // test-mode build land in dist/ui makes a running app request assets the Hub has never seen.
+  // Pin production here: this suite must assert the artifact that actually ships.
+  const result = spawnSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build'], {
+    encoding: 'utf8',
+    env: { ...process.env, NODE_ENV: 'production' },
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `vite build failed ahead of the UI shell tests: ${result.error?.message ?? `exit ${result.status}`}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`,
+    );
   }
 });
 
@@ -52,7 +63,14 @@ describe('built UI shell and split assets', () => {
     expect(Array.isArray(manifest.files)).toBe(true);
     expect(manifest.files.some((f) => f.name.endsWith('.js'))).toBe(true);
     expect(manifest.files.some((f) => f.name.endsWith('.css'))).toBe(true);
-    expect(manifest.files.some((f) => /^sample-agent-set\.tar-.+\.gz$/.test(f.name))).toBe(true);
+    // The demo tarball that used to prove non-JS/CSS assets get hashed and listed shipped with
+    // the platform demo panels and was removed in 3.0.0; the contract that remains is that every
+    // listed entry is addressable and sized.
+    for (const file of manifest.files) {
+      expect(file.name).toMatch(/^[^/]+$/);
+      expect(file.size).toBeGreaterThan(0);
+      expect(typeof file.type).toBe('string');
+    }
   });
 
   it('serves a listed asset and refuses an unlisted or .map uri with JSON-RPC -32602', async () => {

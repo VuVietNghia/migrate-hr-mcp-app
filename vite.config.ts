@@ -20,6 +20,9 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', '@privos_ai/app-react'],
+          docx: ['docx'],
+          xlsx: ['xlsx'],
+          'antd-icons': ['@ant-design/icons'],
         },
       },
     },

@@ -4,6 +4,51 @@ This project follows [Semantic Versioning](https://semver.org/). Each marketplac
 must equal `privos-app.json.version` and `package.json.version`; change both release notes and metadata
 in one commit.
 
+## [3.0.0] - 2026-09-08
+
+### Changed
+
+- **Replaced the platform demo dashboard with the HR Mini App feature set** migrated from
+  `privos-demo-hrm-ws`: Company home, Email history + interview templates, Recruitment, CV
+  Pipeline (AI scoring), Scored CVs kanban, JD editor, Employee lifecycle, Payroll, Drafting bot.
+- **New app-owned tools** `hrm.payroll.query/create/update/delete` and `hrm.mail.send/retry`.
+  Every call requires a Hub-verified actor and is pinned to `actor.roomId`; the Hub is reached
+  with the installation-bot credential (`mcpapp.db.*`, `mcpapp.lists.*`).
+- **Permissions narrowed** to what the HR features call: `basic:information`, `lists:read`,
+  `lists:write`, `files:read`, `files:write`, `db:*` (required); `sandbox:ai-chat`,
+  `sandbox:ai-chat:write` (optional). All other demo scopes removed.
+- **New secret env**: `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID`, `EMAILJS_PUBLIC_KEY`,
+  `EMAILJS_PRIVATE_KEY` (server-side EmailJS relay).
+
+### Removed
+
+- All platform demo tabs and the `hr_app_object_store` / `hr_app_db_store` demo tools.
+
+### Fixed
+
+- `tests/packaging.spec.ts` derived the archive name from the version but hard-coded the app
+  name; `tests/ui-shell.spec.ts` could not spawn `node_modules/.bin/vite` on Windows and silently
+  skipped 7 contract tests.
+
+### Operational note — shipping a UI change
+
+The Hub serves an app's split UI assets from its own object-storage snapshot (`.apps/{appId}/`);
+it does not proxy them from the running app. A rebuild that changes a chunk's content hash produces
+filenames the snapshot does not contain, and those assets return 404 while the unchanged chunks
+keep serving. Restarting the app does not re-ingest them.
+
+In production mode (`npm start`):
+
+- Build, then restart the app — `serveBuiltUi` snapshots `dist/ui` once, so a running process keeps
+  serving the shell it read at startup.
+- A UI change whose hashes moved needs a version bump plus Hub Admin -> Apps -> this app ->
+  Settings -> Refresh before the new assets exist Hub-side. Bump the version only together with
+  that Refresh: raising it without one puts the app into `MANIFEST_DRIFT`.
+- Never rebuild while the app is open in the Hub.
+
+For day-to-day UI work use `npm run dev`, which points the iframe at the Vite dev server and
+bypasses the snapshot path entirely (HMR, no Refresh, no version bump).
+
 ## [2.17.3] - 2026-09-01
 
 ### Changed

@@ -22,9 +22,8 @@ import _pkg from '../privos-app.json';
 import { getAppIconDataUri } from './app-icon';
 import { createLicenseGuard } from './license';
 import { checkAgentBotCredential } from './agent-bot-credential-check';
-import { APP_OBJECT_STORE_TOOL, APP_DB_STORE_TOOL, APP_PLATFORM_TOOL_DEFINITIONS } from './app-platform-demo-tool-defs';
-import { handleAppObjectStoreTool } from './app-objects-demo-tool';
-import { handleAppDbStoreTool } from './app-db-demo-tool';
+import { PAYROLL_TOOL_DEFINITIONS, handlePayrollTool, isPayrollTool } from './payroll-tools';
+import { MAIL_TOOL_DEFINITIONS, handleMailTool, isMailTool } from './mail-tools';
 const pkg = _pkg as Record<string, any>;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const TOOL_NAME = 'hr_management_dashboard';
@@ -187,7 +186,8 @@ export async function handleMcpMessage(
 							properties: {},
 						},
 					},
-					...APP_PLATFORM_TOOL_DEFINITIONS,
+					...PAYROLL_TOOL_DEFINITIONS,
+					...MAIL_TOOL_DEFINITIONS,
 				],
 			};
 
@@ -205,11 +205,11 @@ export async function handleMcpMessage(
 			if (params?.name === CREDENTIAL_CHECK_TOOL) {
 				return { content: [{ type: 'text', text: JSON.stringify(await checkAgentBotCredential()) }] };
 			}
-			if (params?.name === APP_OBJECT_STORE_TOOL) {
-				return { content: [{ type: 'text', text: JSON.stringify(await handleAppObjectStoreTool(params?.arguments || {})) }] };
+			if (isPayrollTool(params?.name)) {
+				return handlePayrollTool(params.name, params?.arguments, actor);
 			}
-			if (params?.name === APP_DB_STORE_TOOL) {
-				return { content: [{ type: 'text', text: JSON.stringify(await handleAppDbStoreTool(params?.arguments || {})) }] };
+			if (isMailTool(params?.name)) {
+				return handleMailTool(params.name, params?.arguments, actor);
 			}
 			if (params?.name !== TOOL_NAME) {
 				throw new Error(`Unknown tool: ${params?.name || '<missing>'}`);
