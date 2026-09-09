@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { beforeAll, describe, expect, it } from 'vitest';
 import appManifest from '../privos-app.json';
@@ -11,8 +13,22 @@ import { LazyBoundary } from '../src/ui/lazy-boundary';
 // and hide exactly the mismatch this file exists to catch.
 const uiTool = (appManifest.tools as { ui?: { resourceUri?: string } }[]).find((tool) => tool.ui?.resourceUri);
 const UI_RESOURCE_URI = uiTool!.ui!.resourceUri!;
-const ASSETS_MANIFEST_URI = `${UI_RESOURCE_URI.slice(0, UI_RESOURCE_URI.lastIndexOf('/') + 1)}assets-manifest.json`;
 const ASSET_URI_PREFIX = `${UI_RESOURCE_URI.slice(0, UI_RESOURCE_URI.lastIndexOf('/') + 1)}assets/`;
+/** Matches the relay response cap the inlined shell has to fit inside (`DEFAULT_MAX_RESPONSE_BYTES`). */
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const DIST_ASSETS_DIR = fileURLToPath(new URL('../dist/ui/assets/', import.meta.url));
+
+/** Total bytes the build emitted — what an inlined shell must contain at minimum. */
+function builtAssetBytes(): number {
+  return readdirSync(DIST_ASSETS_DIR).reduce((total, name) => total + statSync(DIST_ASSETS_DIR + name).size, 0);
+}
+
+/** The single build output with the given extension; the inline shell only works with one of each. */
+function builtAssetNamed(extension: string): string {
+  const matches = readdirSync(DIST_ASSETS_DIR).filter((name) => name.endsWith(extension));
+  expect(matches).toHaveLength(1);
+  return matches[0];
+}
 
 // `verify:fast-pr` runs `test` before `build`, so these assertions on the production shell/asset
 // contract cannot assume `dist/ui` already exists — build it here first, the same way
@@ -20,11 +36,11 @@ const ASSET_URI_PREFIX = `${UI_RESOURCE_URI.slice(0, UI_RESOURCE_URI.lastIndexOf
 beforeAll(() => {
   // `node_modules/.bin/vite` is an extensionless shell script — spawnSync cannot execute it on
   // Windows. Call vite's JS entry with the node binary already running the tests: works on every OS.
-  // vitest sets NODE_ENV=test, and Vite keys minification off it: a test-mode build emits
-  // DIFFERENT content hashes than `npm run build` and, with emptyOutDir, replaces dist/ui with
-  // them. The Hub serves UI assets from a snapshot of the production filenames, so letting a
-  // test-mode build land in dist/ui makes a running app request assets the Hub has never seen.
-  // Pin production here: this suite must assert the artifact that actually ships.
+  // vitest sets NODE_ENV=test, and Vite keys minification off it: a test-mode build is
+  // unminified and, with emptyOutDir, replaces dist/ui with it. The shell inlines whatever is
+  // in dist/ui, so an unminified build would have this suite assert a payload several times
+  // the size of the one that ships — and the size assertion below is a real contract against
+  // the relay response cap. Pin production: assert the artifact that actually ships.
   const result = spawnSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build'], {
     encoding: 'utf8',
     env: { ...process.env, NODE_ENV: 'production' },
@@ -42,53 +58,67 @@ describe('UI resource identity (appSlug = app.appId, never a different host)', (
   });
 });
 
-describe('built UI shell and split assets', () => {
-  it('serves a shell with the relay meta tag, the boot watchdog, and only relative asset tags', async () => {
+describe('built UI shell with inlined assets', () => {
+  it('inlines every script and stylesheet so the iframe fetches nothing', async () => {
     const result = await handleMcpMessage('resources/read', 1, { uri: UI_RESOURCE_URI });
     const html = result.contents[0].text as string;
 
-    expect(html).toContain('<meta name="privos-ui-assets" content="relay">');
-    expect(html).toContain('__privosUiBooted');
-    expect(html).toContain('ui/asset-load-failed');
-    // Every script/link tag must reference `./assets/…` — never an absolute or external URL.
-    for (const match of html.matchAll(/\b(?:src|href)\s*=\s*"([^"]+)"/g)) {
-      expect(match[1]).toMatch(/^\.?\/?assets\//);
+    // The Hub only fetches and rewrites assets for a shell that opts in with this meta tag.
+    // Its absence is what keeps this app off the generation-snapshot path entirely.
+    expect(html).not.toContain('privos-ui-assets');
+    // No `src`/`href` may survive on a script or link tag: the sandboxed iframe runs at
+    // `Origin: null` and has nothing to resolve even a relative reference against.
+    for (const tag of [...html.matchAll(/<(?:script|link)\b[^>]*>/gi)]) {
+      expect(tag[0]).not.toMatch(/\b(?:src|href)\s*=/i);
     }
+    expect(html).toContain('<script type="module">');
+    expect(html).toContain('<style>');
   });
 
-  it('lists build files through the sibling assets-manifest resource', async () => {
-    const result = await handleMcpMessage('resources/read', 2, { uri: ASSETS_MANIFEST_URI });
-    const manifest = JSON.parse(result.contents[0].text as string) as { files: { name: string; size: number; type: string }[] };
+  it('carries each built file verbatim, escaped so it cannot terminate its own element', async () => {
+    const result = await handleMcpMessage('resources/read', 2, { uri: UI_RESOURCE_URI });
+    const html = result.contents[0].text as string;
 
-    expect(Array.isArray(manifest.files)).toBe(true);
-    expect(manifest.files.some((f) => f.name.endsWith('.js'))).toBe(true);
-    expect(manifest.files.some((f) => f.name.endsWith('.css'))).toBe(true);
-    // The demo tarball that used to prove non-JS/CSS assets get hashed and listed shipped with
-    // the platform demo panels and was removed in 3.0.0; the contract that remains is that every
-    // listed entry is addressable and sized.
-    for (const file of manifest.files) {
-      expect(file.name).toMatch(/^[^/]+$/);
-      expect(file.size).toBeGreaterThan(0);
-      expect(typeof file.type).toBe('string');
+    // The bundle is present in full, not truncated or summarized.
+    expect(Buffer.byteLength(html, 'utf8')).toBeGreaterThan(builtAssetBytes());
+
+    // Each built file appears as the exact body of its element, under the one transformation the
+    // renderer is allowed to make. `</script` is the ONLY sequence that ends a script element, so
+    // the literal `<script` and `</style>` the drafting templates embed must survive untouched —
+    // asserting on the whole document instead would wrongly flag those as breakage.
+    for (const [name, tag] of [
+      [builtAssetNamed('.js'), 'script'],
+      [builtAssetNamed('.css'), 'style'],
+    ] as const) {
+      const source = readFileSync(DIST_ASSETS_DIR + name, 'utf8');
+      const escaped = source.replace(new RegExp(`</(?=${tag})`, 'gi'), '<\\/');
+      const open = tag === 'script' ? '<script type="module">' : '<style>';
+      expect(html).toContain(`${open}${escaped}</${tag}>`);
+      expect(escaped).not.toMatch(new RegExp(`</${tag}`, 'i'));
     }
+
+    // The document survives to its own end — the shell was not truncated mid-bundle.
+    expect(html.trimEnd()).toMatch(/<\/html>$/);
   });
 
-  it('serves a listed asset and refuses an unlisted or .map uri with JSON-RPC -32602', async () => {
-    const manifestResult = await handleMcpMessage('resources/read', 3, { uri: ASSETS_MANIFEST_URI });
-    const { files } = JSON.parse(manifestResult.contents[0].text as string) as { files: { name: string }[] };
-    const jsFile = files.find((f) => f.name.endsWith('.js'))!;
+  it('fits inside the relay response cap it now depends on', async () => {
+    const result = await handleMcpMessage('resources/read', 3, { uri: UI_RESOURCE_URI });
+    const bytes = Buffer.byteLength(result.contents[0].text as string, 'utf8');
+    expect(bytes).toBeLessThan(MAX_RESPONSE_BYTES);
+  });
 
-    const asset = await handleMcpMessage('resources/read', 4, {
-      uri: `${ASSET_URI_PREFIX}${jsFile.name}`,
-    });
-    expect(asset.contents[0].mimeType).toBe('text/javascript');
-    expect(typeof asset.contents[0].text).toBe('string');
-
-    const unknown = await handleMcpMessage('resources/read', 5, {
-      uri: `${ASSET_URI_PREFIX}does-not-exist.js.map`,
-    }).catch((err: Error & { code?: number }) => err);
-    expect(unknown).toBeInstanceOf(Error);
-    expect((unknown as Error & { code?: number }).code).toBe(-32602);
+  it('refuses the retired split-asset URIs with JSON-RPC -32602', async () => {
+    for (const [id, uri] of [
+      [4, `${ASSET_URI_PREFIX}index-abcdefgh.js`],
+      [5, `${ASSET_URI_PREFIX}does-not-exist.js.map`],
+      [6, `${UI_RESOURCE_URI.slice(0, UI_RESOURCE_URI.lastIndexOf('/') + 1)}assets-manifest.json`],
+    ] as const) {
+      const refused = await handleMcpMessage('resources/read', id, { uri }).catch(
+        (err: Error & { code?: number }) => err,
+      );
+      expect(refused).toBeInstanceOf(Error);
+      expect((refused as Error & { code?: number }).code).toBe(-32602);
+    }
   });
 
   it('serves the identical shell from both the tools/call embedded resource and resources/read', async () => {

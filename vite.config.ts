@@ -13,17 +13,17 @@ export default defineConfig({
     emptyOutDir: true,
     manifest: true,
     sourcemap: false,
-    // Every referenced asset becomes a real hashed `assets/` file, never an inlined base64
-    // data URI — split-asset serving needs a filename to address over `ui://…/assets/<file>`.
-    assetsInlineLimit: 0,
+    // The shell is served with its JS/CSS inlined (see `renderInlineShell` in
+    // mcp-message-handlers.ts), so the iframe has no origin to resolve `./assets/…`
+    // against: every referenced asset MUST become a base64 data URI, never a file.
+    // This is the exact inverse of the split-asset build it replaced.
+    assetsInlineLimit: Number.MAX_SAFE_INTEGER,
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', '@privos_ai/app-react'],
-          docx: ['docx'],
-          xlsx: ['xlsx'],
-          'antd-icons': ['@ant-design/icons'],
-        },
+        // One self-contained chunk. Inlining several chunks into one document would
+        // strand their relative import specifiers (`import … from "./vendor-<hash>.js"`),
+        // which resolve against an origin the sandboxed iframe does not have.
+        inlineDynamicImports: true,
       },
     },
   },

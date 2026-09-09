@@ -66,15 +66,22 @@ async function start(): Promise<void> {
 		},
 	});
 
-	// development + PRIVOS_TRANSPORT=relay: run the app-local pairing loop (and
-	// optional live Vite dev UI) alongside serveApp's HTTP support surface.
+	// The live Vite dev UI is independent of the runtime mode: it only decides where the
+	// iframe loads its UI from. Gating it on `development` made it unreachable as soon as a
+	// standalone identity file existed, because that alone resolves the mode to
+	// `standalone-production` — and `npm run dev`'s PRIVOS_TRANSPORT=relay is then rejected
+	// outright by serveApp. Run it off its own env flag so a paired app can still iterate on
+	// the UI: `PRIVOS_DEV_UI=1 npm start` (no PRIVOS_TRANSPORT).
+	if (process.env.PRIVOS_DEV_UI === '1') {
+		const { startDevUiServer } = await import('./dev-server');
+		const { setDevPublicUrl } = await import('./mcp-message-handlers');
+		const dev = await startDevUiServer();
+		setDevPublicUrl(dev.publicUrl);
+	}
+
+	// development + PRIVOS_TRANSPORT=relay: run the app-local pairing loop alongside
+	// serveApp's HTTP support surface. Production modes get their transport from serveApp.
 	if (handle.mode === 'development' && transportOverride === 'relay') {
-		if (process.env.PRIVOS_DEV_UI === '1') {
-			const { startDevUiServer } = await import('./dev-server');
-			const { setDevPublicUrl } = await import('./mcp-message-handlers');
-			const dev = await startDevUiServer();
-			setDevPublicUrl(dev.publicUrl);
-		}
 		const { startDevelopmentRelay } = await import('./relay-transport');
 		await startDevelopmentRelay();
 	}

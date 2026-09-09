@@ -1,20 +1,24 @@
 /**
  * MCP JSON-RPC method handlers for the relay demo app.
- * Production: the shell (`builtUi.renderHtml()`) and its hashed `assets/`
- * files are split over separate `resources/read` calls — the Hub fetches
- * assets once per installation generation and re-serves them from its own
- * origin, so the same 250 KB bundle no longer travels the relay on every tab
- * open. In development: reads source and builds on-the-fly via Vite.
+ *
+ * Production: the shell is served with its JS and CSS inlined
+ * (`renderInlineShell`), so the iframe issues zero asset requests. This
+ * deliberately opts OUT of the Hub's split-asset path: that path serves assets
+ * from an object-storage snapshot taken once per installation generation, so any
+ * rebuild that moved a content hash 404s until a version bump plus a Hub
+ * Refresh. Inlining trades ~1.3 MB per tab open (against an 8 MB relay response
+ * cap) for a UI that ships on rebuild + restart alone.
+ *
+ * In development: reads source and builds on-the-fly via Vite.
  */
+import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 
 import {
 	getPlatformContext,
 	publicUrlFor,
-	serveBuiltUi,
 	INVALID_PARAMS,
-	type ServeBuiltUi,
 	type VerifiedActor,
 } from '@privos_ai/app-server';
 
@@ -38,16 +42,11 @@ const BULK_EXPORT_TOOL = 'hr_bulk_export';
 const CREDENTIAL_CHECK_TOOL = 'hr_agent_bot_credential_check';
 /**
  * `ui://<appSlug>/…` — `appSlug` MUST be `app.appId`, i.e. `privos-app.json`'s `name`
- * (`ai.privos.mcp-app-demo`), never a different, human-friendlier host string. The Hub resolves
- * `serveBuiltUi`'s asset/manifest URIs from the registered app id, not from this resource URI —
- * a mismatch here 404s every asset behind a correct-looking "App assets unavailable" watchdog.
+ * (`ai.privos.mcp-app-demo-can-run`), never a different, human-friendlier host string. The Hub
+ * resolves an app's UI resource from the registered app id, so a mismatch here means the tool
+ * renders nothing at all.
  */
 const UI_RESOURCE_URI = `ui://${pkg.name}/form.html`;
-/** `appSlug` for `serveBuiltUi` — must equal `app.appId` (`privos-app.json`'s `name`). Derived from
- * {@link UI_RESOURCE_URI}'s host so the two can never drift apart again. */
-const UI_APP_SLUG = new URL(UI_RESOURCE_URI).host;
-/** Sits beside {@link UI_RESOURCE_URI}, not under the `assets/` prefix — matches the SDK's own convention. */
-const ASSETS_MANIFEST_URI = `${UI_RESOURCE_URI.slice(0, UI_RESOURCE_URI.lastIndexOf('/') + 1)}assets-manifest.json`;
 
 /**
  * Embed origins this app declares, read straight from the published manifest so the runtime
@@ -59,20 +58,103 @@ const UI_DECLARED_CSP: Record<string, string[]> | undefined = (pkg.tools as any[
 
 const appIcon = getAppIconDataUri();
 
+const DIST_UI_DIR = path.join(moduleDir, '../dist/ui');
+/** Matches `<link …>` — self-closing, so it has no end tag to consume. */
+const LINK_TAG_RE = /<link\b[^>]*>/gi;
+/** Matches `<script … src="…"></script>`, end tag included, so the whole element is replaced. */
+const EXTERNAL_SCRIPT_TAG_RE = /<script\b[^>]*\bsrc\s*=\s*(["'])[^"']*\1[^>]*>\s*<\/script>/gi;
+const REL_RE = /\brel\s*=\s*["']([^"']+)["']/i;
+const SRC_OR_HREF_RE = /\b(?:src|href)\s*=\s*["']([^"']+)["']/i;
+
 /**
- * Built once, lazily: constructing before `dist/ui` exists (e.g. `npm test`
+ * Rendered once, lazily: reading `dist/ui` before it exists (e.g. `npm test`
  * runs ahead of `npm run build` in `verify:fast-pr`) must not crash every
- * caller that merely imports this module. `serveBuiltUi` throws at
- * construction on a malformed build (non-relative asset tags, unhashed/
- * oversized/`.map` files under `assets/`) — that failure surfaces the first
- * time the UI is actually requested, never earlier.
+ * caller that merely imports this module. A malformed build throws here — the
+ * first time the UI is actually requested, never earlier.
  */
-let builtUi: ServeBuiltUi | null = null;
-function getBuiltUi(): ServeBuiltUi {
-	if (!builtUi) {
-		builtUi = serveBuiltUi({ distDir: path.join(moduleDir, '../dist/ui'), appSlug: UI_APP_SLUG });
+let inlineShellHtml: string | null = null;
+
+/**
+ * The built `index.html` with every `<script src>` / `<link rel=stylesheet>` replaced by the
+ * file's own bytes. The sandboxed iframe runs at `Origin: null` and has nothing to resolve a
+ * relative `./assets/…` against, so a reference surviving this pass would render a blank frame;
+ * {@link assertNoExternalRefs} turns that into a loud boot failure instead.
+ */
+function renderInlineShell(): string {
+	if (inlineShellHtml) return inlineShellHtml;
+
+	const indexPath = path.join(DIST_UI_DIR, 'index.html');
+	let html: string;
+	try {
+		html = fs.readFileSync(indexPath, 'utf8');
+	} catch (err) {
+		throw new Error(`renderInlineShell: cannot read ${indexPath}: ${(err as Error).message}`);
 	}
-	return builtUi;
+
+	html = html.replace(LINK_TAG_RE, (tag) => {
+		const rel = REL_RE.exec(tag)?.[1]?.toLowerCase();
+		// Preloads only warm a network fetch that no longer happens; the bytes are already here.
+		if (rel === 'modulepreload' || rel === 'preload') return '';
+		if (rel !== 'stylesheet') return tag;
+		const href = SRC_OR_HREF_RE.exec(tag)?.[1];
+		if (!href) return tag;
+		return `<style>${escapeForRawTextElement(readDistFile(href, indexPath), 'style')}</style>`;
+	});
+
+	html = html.replace(EXTERNAL_SCRIPT_TAG_RE, (tag) => {
+		const src = SRC_OR_HREF_RE.exec(tag)?.[1];
+		if (!src) return tag;
+		return `<script type="module">${escapeForRawTextElement(readDistFile(src, indexPath), 'script')}</script>`;
+	});
+
+	assertNoExternalRefs(html, indexPath);
+	inlineShellHtml = html;
+	return html;
+}
+
+/** Read a build-relative reference (`./assets/index-<hash>.js`) from `dist/ui`, refusing escapes. */
+function readDistFile(reference: string, indexPath: string): string {
+	if (/^[a-z][a-z0-9+.-]*:/i.test(reference) || reference.startsWith('//') || reference.startsWith('/')) {
+		throw new Error(`renderInlineShell: ${indexPath} references a non-relative asset "${reference}" — build with Vite base: './'`);
+	}
+	const distRealpath = fs.realpathSync(DIST_UI_DIR);
+	const filePath = fs.realpathSync(path.join(DIST_UI_DIR, reference));
+	const relative = path.relative(distRealpath, filePath);
+	if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+		throw new Error(`renderInlineShell: asset "${reference}" resolves outside ${DIST_UI_DIR}`);
+	}
+	return fs.readFileSync(filePath, 'utf8');
+}
+
+/**
+ * Inside `<script>` / `<style>` the HTML tokenizer looks for exactly one thing: the element's own
+ * closing tag. Bundled code carrying that literal (an HTML template string, a regex) would cut the
+ * document in half. `<\/script` is an identity escape in both JS and CSS string literals — same
+ * bytes to the parser that matters, invisible to the one that must not match.
+ */
+function escapeForRawTextElement(source: string, tagName: 'script' | 'style'): string {
+	const escaped = source.replace(new RegExp(`</(?=${tagName})`, 'gi'), '<\\/');
+	if (new RegExp(`</${tagName}`, 'i').test(escaped)) {
+		throw new Error(`renderInlineShell: could not neutralize a literal </${tagName} in the bundle`);
+	}
+	return escaped;
+}
+
+/**
+ * No `<script src>` / `<link href>` may survive inlining. Letting one through would reintroduce
+ * exactly the failure this rendering path exists to remove — an asset fetch the iframe cannot
+ * resolve — as a blank frame rather than an error.
+ */
+function assertNoExternalRefs(html: string, indexPath: string): void {
+	const offenders: string[] = [];
+	for (const tag of [...html.matchAll(LINK_TAG_RE), ...html.matchAll(/<script\b[^>]*>/gi)]) {
+		if (SRC_OR_HREF_RE.test(tag[0])) offenders.push(tag[0]);
+	}
+	if (offenders.length > 0) {
+		throw new Error(
+			`renderInlineShell: ${indexPath} still references external assets after inlining:\n${offenders.map((o) => `  - ${o}`).join('\n')}`,
+		);
+	}
 }
 
 /**
@@ -88,7 +170,7 @@ export function setDevPublicUrl(publicUrl: string): void {
 
 /** The shell HTML for the current mode — live dev server, or the built-and-cached production shell. */
 function currentShellHtml(): string {
-	return devPublicUrl ? getDevUiHtml(devPublicUrl) : getBuiltUi().renderHtml();
+	return devPublicUrl ? getDevUiHtml(devPublicUrl) : renderInlineShell();
 }
 
 /**
@@ -236,15 +318,16 @@ export async function handleMcpMessage(
 }
 
 /**
- * `resources/read` branches on the requested URI: the shell, the assets
- * manifest, or one split asset. Any other URI is refused — before the split,
- * this handler echoed the UI HTML for every URI it was asked about; that
- * silent fallback is gone by design (see the demo's CHANGELOG).
+ * `resources/read` serves exactly one resource: the shell. The split-asset URIs
+ * (`…/assets-manifest.json`, `…/assets/<file>`) are gone along with the split
+ * itself — the shell carries its own bytes now, so there is nothing else to
+ * read. Any other URI is refused; before the split, this handler echoed the UI
+ * HTML for every URI it was asked about, and that silent fallback stays gone by
+ * design (see the demo's CHANGELOG).
  *
- * Dev mode short-circuits ahead of all of this: the live Vite dev server is
- * the only source of truth there (no split assets exist to read), so it keeps
- * echoing the dev shell for whatever URI was requested, matching the
- * pre-split behavior exactly.
+ * Dev mode short-circuits ahead of all of this: the live Vite dev server is the
+ * only source of truth there, so it keeps echoing the dev shell for whatever URI
+ * was requested.
  */
 function handleResourcesRead(uri: unknown): { contents: unknown[] } {
 	if (devPublicUrl) {
@@ -262,15 +345,6 @@ function handleResourcesRead(uri: unknown): { contents: unknown[] } {
 	if (uri === UI_RESOURCE_URI) {
 		return { contents: [{ uri: UI_RESOURCE_URI, mimeType: 'text/html;profile=mcp-app', text: currentShellHtml() }] };
 	}
-
-	if (uri === ASSETS_MANIFEST_URI) {
-		return {
-			contents: [{ uri: ASSETS_MANIFEST_URI, mimeType: 'application/json', text: JSON.stringify(getBuiltUi().readAssetsManifest()) }],
-		};
-	}
-
-	const asset = typeof uri === 'string' ? getBuiltUi().readAsset(uri) : null;
-	if (asset) return { contents: [asset] };
 
 	throw Object.assign(new Error(`Unknown resource: ${typeof uri === 'string' ? uri : '<missing>'}`), {
 		code: INVALID_PARAMS,

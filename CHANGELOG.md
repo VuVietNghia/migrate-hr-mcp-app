@@ -4,6 +4,28 @@ This project follows [Semantic Versioning](https://semver.org/). Each marketplac
 must equal `privos-app.json.version` and `package.json.version`; change both release notes and metadata
 in one commit.
 
+## [Unreleased]
+
+### Fixed
+
+- **UI assets no longer 404 after a rebuild.** The shell is now served with its JS and CSS
+  inlined (`renderInlineShell` in `src/mcp-message-handlers.ts`) instead of split over the Hub's
+  asset route, so the iframe issues zero asset requests. The Hub only fetches and re-serves
+  assets for a shell carrying `<meta name="privos-ui-assets" content="relay">`; dropping that
+  opt-in takes this app off the generation-snapshot path entirely. **This supersedes the
+  "Operational note — shipping a UI change" under 3.0.0 below**: a UI change now ships with
+  build + restart alone — no version bump, no Hub Refresh, no `MANIFEST_DRIFT` risk.
+  - `vite.config.ts` emits one self-contained chunk (`inlineDynamicImports`, no `manualChunks`)
+    and inlines every other asset as a data URI (`assetsInlineLimit`): a sandboxed iframe runs at
+    `Origin: null` and cannot resolve even a relative `./assets/…` reference.
+  - Cost: ~1.3 MB per tab open against the 8 MB relay response cap, and no browser caching of
+    the bundle. `tests/ui-shell.spec.ts` asserts the size stays under the cap.
+- **The live Vite dev UI works on a paired app again.** `PRIVOS_DEV_UI` was gated on
+  `handle.mode === 'development'`, but a standalone identity file alone resolves the mode to
+  `standalone-production` — and `npm run dev`'s `PRIVOS_TRANSPORT=relay` is then rejected
+  outright by `serveApp`, so the app failed to boot at all. The dev UI now runs off its own flag:
+  `PRIVOS_DEV_UI=1 npm start` (no `PRIVOS_TRANSPORT`).
+
 ## [3.0.0] - 2026-09-08
 
 ### Changed
