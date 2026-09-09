@@ -12,6 +12,14 @@ interface RoomFile {
 
 type JsonRecord = Record<string, unknown>;
 
+/**
+ * Says the one thing the user can act on. Both "the folder was never created" and "the folder is
+ * empty" mean exactly this to someone looking at the app, so they share a message — while a
+ * listing that could not be read must NOT land here (see {@link CompanyContextProvider.readCollection}).
+ */
+const MISSING_COMPANY_INFO =
+  'Chưa có thông tin công ty. Vào tab Company để nhập website hoặc tải tài liệu công ty lên.';
+
 export class CompanyContextProvider implements ICompanyContextProvider {
   constructor(
     private readonly app: McpApp,
@@ -21,20 +29,20 @@ export class CompanyContextProvider implements ICompanyContextProvider {
   async getContext(): Promise<string> {
     const companyFolderId = await this.findCompanyFolderId();
     if (!companyFolderId) {
-      throw new Error('Không tìm thấy thư mục hr-miniapp/company trong Room.');
+      throw new Error(MISSING_COMPANY_INFO);
     }
 
     const response = await this.app.callServerTool({
       name: 'mcpapp.files.getByChannel',
       arguments: { channelId: this.roomId, folderId: companyFolderId }
     });
-    const fileNames = this.parseCollection(response)
+    const fileNames = this.readCollection(response, 'files', 'tài liệu công ty')
       .map(value => this.asRoomFile(value)?.name)
       .filter((name): name is string => Boolean(name && this.isSafeFileName(name)))
       .sort((left, right) => left.localeCompare(right, 'vi'));
 
     if (fileNames.length === 0) {
-      throw new Error('Chưa có tài liệu trong thư mục hr-miniapp/company.');
+      throw new Error(MISSING_COMPANY_INFO);
     }
 
     return fileNames
@@ -59,28 +67,41 @@ export class CompanyContextProvider implements ICompanyContextProvider {
       }
     });
 
-    return this.parseCollection(response)
+    return this.readCollection(response, 'folders', 'thư mục công ty')
       .map(value => this.asRoomFolder(value))
       .find(folder => folder?.name === folderName)?._id;
   }
 
-  private parseCollection(response: unknown): unknown[] {
-    const content = this.asRecord(response)?.content;
-    if (!Array.isArray(content)) return [];
+  /**
+   * Read a Room Files listing, throwing when the response cannot be read at all.
+   *
+   * The distinction is the point: this used to return `[]` for a Hub error, a malformed payload
+   * and a genuinely empty folder alike, so a permission or transport failure reached the user as
+   * "there is no company information" — a claim about their data that the app had no basis to
+   * make. An empty-but-valid listing still returns `[]`; only unreadable responses throw.
+   */
+  private readCollection(response: unknown, key: 'folders' | 'files', subject: string): unknown[] {
+    const unreadable = () => new Error(`Không đọc được danh sách ${subject} từ Room Files.`);
+    const record = this.asRecord(response);
+    if (record?.isError === true) throw unreadable();
+
+    const content = record?.content;
+    if (!Array.isArray(content)) throw unreadable();
 
     const text = this.asRecord(content[0])?.text;
-    if (typeof text !== 'string') return [];
+    if (typeof text !== 'string') throw unreadable();
 
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed;
-
-      const parsedRecord = this.asRecord(parsed);
-      const nestedCollection = parsedRecord?.folders ?? parsedRecord?.files;
-      return Array.isArray(nestedCollection) ? nestedCollection : [];
+      parsed = JSON.parse(text);
     } catch {
-      return [];
+      throw unreadable();
     }
+    if (Array.isArray(parsed)) return parsed;
+
+    const nestedCollection = this.asRecord(parsed)?.[key];
+    if (!Array.isArray(nestedCollection)) throw unreadable();
+    return nestedCollection;
   }
 
   private asRoomFolder(value: unknown): RoomFolder | undefined {
