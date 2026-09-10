@@ -2,7 +2,7 @@ import { McpApp } from '@privos_ai/app-react';
 import { EmployeeProfile, ILifecycleService, PassedCandidate } from '../types';
 
 export class PrivOSLifecycleService implements ILifecycleService {
-  private static readonly SYSTEM_PREFIX = '[HR-MiniApp]';
+  private static readonly SYSTEM_PREFIX = '[HR-MCP-App]';
   private static readonly LEGACY_EXACT_NAME = 'Hồ sơ nhân sự';
   private static readonly SYSTEM_CONFIG_NAME = '[Hệ thống] Không xoá - Cấu hình Kanban';
   private static readonly DEFAULT_STAGE = 'Mới nhận việc';

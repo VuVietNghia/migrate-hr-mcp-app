@@ -42,7 +42,7 @@ const BULK_EXPORT_TOOL = 'hr_bulk_export';
 const CREDENTIAL_CHECK_TOOL = 'hr_agent_bot_credential_check';
 /**
  * `ui://<appSlug>/…` — `appSlug` MUST be `app.appId`, i.e. `privos-app.json`'s `name`
- * (`ai.privos.mcp-app-demo-can-run`), never a different, human-friendlier host string. The Hub
+ * (`ai.privos.mcp-app-demo-hr-hrm`), never a different, human-friendlier host string. The Hub
  * resolves an app's UI resource from the registered app id, so a mismatch here means the tool
  * renders nothing at all.
  */
