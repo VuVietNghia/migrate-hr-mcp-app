@@ -1,5 +1,5 @@
 import { McpApp } from '@privos_ai/app-react';
-import { restCall, getFileContent, createOrUpdateFile, ensureFolderPath } from './privos-rest';
+import { restCall, getFileContent, createOrUpdateFile, ensureFolderPath, listFileNames } from './privos-rest';
 import { ICvContextBuilder } from './cv-context-builder';
 import cvProcessingGuidelinesRaw from './data/cv_processing_guidelines.md?raw';
 import cvMdTemplateRaw from './data/cv_md_template.md?raw';
@@ -70,15 +70,21 @@ export async function ensureTemplatesExistGlobal(app: McpApp, roomId: string, fo
   const jdTemplatePath = `${baseFolder}/jd_template.md`;
   const jdGeneratorSkillPath = `${baseFolder}/jd-generator-skill.md`;
 
+  // List the folder once instead of fetching each file's content: a real listing
+  // tells "exists" from "doesn't exist" without depending on how (or whether) the
+  // content endpoint parses that file, so a working file is never mistaken for a
+  // missing one and re-uploaded every mount.
+  const existingFiles = forceReset ? new Set<string>() : await listFileNames(app, baseFolder);
+
   const checkAndUpload = async (path: string, rawContent: string, isGuideline: boolean) => {
     if (!forceReset) {
-      try {
-        const existing = await getFileContent(app, path);
-        if (existing && existing.trim().length > 10) return; // File exists and has valid content
-        console.warn(`[CẢNH BÁO] File ${path} bị lỗi hoặc trống. Tự động khôi phục...`);
-      } catch (err) {
-        console.warn(`[CẢNH BÁO] Thiếu file ${path}. Tự động khôi phục...`);
+      if (existingFiles === null) {
+        console.warn(`[CẢNH BÁO] Không thể liệt kê thư mục ${baseFolder}. Bỏ qua kiểm tra/upload cho ${path} lần này.`);
+        return;
       }
+      const fileName = path.slice(baseFolder.length + 1);
+      if (existingFiles.has(fileName)) return; // File already exists
+      console.warn(`[CẢNH BÁO] Thiếu file ${path}. Tự động khôi phục...`);
     }
 
     // Replace hardcoded room ID in guidelines with current room ID

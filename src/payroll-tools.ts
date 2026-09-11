@@ -169,25 +169,40 @@ export async function handlePayrollTool(name: PayrollToolName, rawArgs: unknown,
 	const roomId = resolveActorRoom(args, actor);
 	const { repository } = dependencies;
 
-	switch (name) {
-		case 'hrm.payroll.query': {
-			await repository.initializeSchema(roomId);
-			return wrap({ records: await repository.queryByRoom(roomId) });
+	try {
+		switch (name) {
+			case 'hrm.payroll.query': {
+				await repository.initializeSchema(roomId);
+				return wrap({ records: await repository.queryByRoom(roomId) });
+			}
+			case 'hrm.payroll.create': {
+				const input = readPayrollInput(args.data, false);
+				return wrap(await repository.create(roomId, input));
+			}
+			case 'hrm.payroll.update': {
+				const id = requireId(args);
+				const input = readPayrollInput(args.data, true);
+				await repository.update(roomId, id, input);
+				return wrap({ id, updated: true });
+			}
+			case 'hrm.payroll.delete': {
+				const id = requireId(args);
+				await repository.delete(roomId, id);
+				return wrap({ id, deleted: true });
+			}
 		}
-		case 'hrm.payroll.create': {
-			const input = readPayrollInput(args.data, false);
-			return wrap(await repository.create(roomId, input));
-		}
-		case 'hrm.payroll.update': {
-			const id = requireId(args);
-			const input = readPayrollInput(args.data, true);
-			await repository.update(roomId, id, input);
-			return wrap({ id, updated: true });
-		}
-		case 'hrm.payroll.delete': {
-			const id = requireId(args);
-			await repository.delete(roomId, id);
-			return wrap({ id, deleted: true });
-		}
+	} catch (error) {
+		// TEMP DIAGNOSTIC (2026-09-10) — @privos_ai/app-server's runtime sanitizes every thrown
+		// error down to a bare "Internal error" before it reaches the client, and even its own
+		// server-side log only records `errorCode`, never `message`/`stack` (runtime.js). This is
+		// the only place the real cause is still visible. Remove once hrm.payroll.query's 400 is
+		// root-caused (see docs/superpowers/plans/2026-09-10-payroll-db-conformance-fixes.md).
+		console.error('[hrm.payroll] tool threw', {
+			name,
+			roomId,
+			message: error instanceof Error ? error.message : String(error),
+			stack: error instanceof Error ? error.stack : undefined,
+		});
+		throw error;
 	}
 }

@@ -107,6 +107,13 @@ function renderInlineShell(): string {
 		return `<script type="module">${escapeForRawTextElement(readDistFile(src, indexPath), 'script')}</script>`;
 	});
 
+	// Debug escape hatch for usePolling.ts: the iframe runs at `Origin: null` with no reachable
+	// URL or storage, so this is the only way to hand it a flag — a plain (non-module) inline
+	// script placed before the bundle, which always runs before any deferred module script.
+	if (process.env.PRIVOS_DEBUG_NO_POLL === '1') {
+		html = html.replace(/<head[^>]*>/i, (tag) => `${tag}<script>window.__PRIVOS_NO_POLL__=true;</script>`);
+	}
+
 	assertNoExternalRefs(html, indexPath);
 	inlineShellHtml = html;
 	return html;

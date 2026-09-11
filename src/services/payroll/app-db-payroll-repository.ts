@@ -19,8 +19,27 @@ const PAYROLL_FIELDS = [
 	{ name: 'probationRate', type: 'number', min: 0, max: 100 },
 ] as const;
 
-/** Index uses: queryByRoom (roomId prefix); uniqueness of one payroll row per employee per room. */
+/**
+ * Index uses: queryByRoom (roomId prefix, then employeeId as the paging sort key); uniqueness of
+ * one payroll row per employee per room. Fixed at registerCollection time — `mcpapp.db.updateSchema`
+ * takes `fields` only, so changing this index would require dropping the collection and its data.
+ */
 const PAYROLL_INDEXES = [{ fields: { roomId: 1, employeeId: 1 }, unique: true }] as const;
+
+/** The hub caps one `mcpapp.db.query` response at 1000 docs (tools-database.md — Limits). */
+export const PAYROLL_PAGE_SIZE = 1000;
+
+/** 10 × 1000 = the hub's 10,000 count cap. A hard stop so a misbehaving page never loops forever. */
+export const PAYROLL_MAX_PAGES = 10;
+
+/**
+ * Newest first. `_createdAt` is hub-assigned and is NOT a registered schema field, so sending it to
+ * `orderBy` risks the documented `Unknown field` error — the display order is applied here instead.
+ * Documents without `_createdAt` sort last.
+ */
+function byCreatedAtDesc(a: PayrollDocument, b: PayrollDocument): number {
+	return (b._createdAt ?? '').localeCompare(a._createdAt ?? '');
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -45,17 +64,29 @@ export class AppDbPayrollRepository implements IPayrollRepository {
 	}
 
 	async queryByRoom(roomId: string): Promise<readonly PayrollDocument[]> {
-		// Uses index { roomId: 1, employeeId: 1 } via its roomId prefix.
-		const response = asRecord(
-			await this.callerFactory(roomId)('mcpapp.db.query', {
-				collection: PAYROLL_COLLECTION,
-				where: [{ field: 'roomId', op: '==', value: roomId }],
-				orderBy: [{ field: '_createdAt', direction: 'desc' }],
-				limit: 1000,
-			}),
-		);
-		const records = Array.isArray(response.records) ? response.records : [];
-		return records as PayrollDocument[];
+		const call = this.callerFactory(roomId);
+		const collected: PayrollDocument[] = [];
+
+		for (let page = 0; page < PAYROLL_MAX_PAGES; page += 1) {
+			const response = asRecord(
+				await call('mcpapp.db.query', {
+					collection: PAYROLL_COLLECTION,
+					// Redundant with `scope: 'room'` physical isolation, kept as defence in depth; it also
+					// selects the { roomId: 1, employeeId: 1 } index via its prefix.
+					where: [{ field: 'roomId', op: '==', value: roomId }],
+					// Sorting on the registered, unique `employeeId` gives paging a total order. Without a
+					// stable sort, `offset` paging can repeat or skip documents between pages.
+					orderBy: [{ field: 'employeeId', direction: 'asc' }],
+					limit: PAYROLL_PAGE_SIZE,
+					offset: page * PAYROLL_PAGE_SIZE,
+				}),
+			);
+			const records = Array.isArray(response.records) ? (response.records as PayrollDocument[]) : [];
+			collected.push(...records);
+			if (records.length < PAYROLL_PAGE_SIZE) break;
+		}
+
+		return collected.sort(byCreatedAtDesc);
 	}
 
 	async create(roomId: string, data: PayrollInput): Promise<PayrollDocument> {

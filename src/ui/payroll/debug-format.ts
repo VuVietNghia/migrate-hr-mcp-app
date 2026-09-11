@@ -32,3 +32,14 @@ export function formatPayrollDebugOutput({ roomId, request, result, error }: Pay
     ...(error === undefined ? { result } : { error: serializeError(error) })
   }, null, 2);
 }
+
+/**
+ * The exact request the payroll debug panel sends. `hrm.payroll.query` accepts only `roomId`
+ * (`src/payroll-tools.ts` — PAYROLL_TOOL_DEFINITIONS); `collection` and `where` are arguments of
+ * the server-side `mcpapp.db.query` call and are dropped on the floor if sent from the UI. The
+ * server still re-derives the room from the verified actor — `roomId` is sent so a mismatch is a
+ * loud error rather than a silent redirect.
+ */
+export function buildPayrollDebugRequest(roomId: string): PayrollDebugRequest {
+  return { name: 'hrm.payroll.query', arguments: { roomId } };
+}
