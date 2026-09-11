@@ -1,8 +1,10 @@
 # PrivOS Demo MCP App
 
-This is the reference schema-v2 PrivOS MCP app. It demonstrates exact required and optional
-permissions, safe feature degradation, secretless workload identity, authenticated private Hub
-dispatch, the iframe host bridge, license-aware behavior, and reproducible Marketplace packaging.
+HR Mini App for PrivOS: recruitment pipeline with AI CV scoring, a scored-CV kanban, a JD editor,
+employee lifecycle, payroll, a drafting bot and email history. It is also the reference PrivOS MCP
+app — exact required and optional permissions, safe feature degradation, secretless workload
+identity, authenticated private Hub dispatch, the iframe host bridge, license-aware behavior, and
+reproducible Marketplace packaging.
 
 ## Runtime trust model
 
@@ -220,208 +222,50 @@ npm run manifest:lint
 Portal and Hub add the versioned authoritative permission catalog, data policy, and immutable image
 digest when computing the final permission-contract hash.
 
-## Installation-owned agent bot demo
+## Feature tabs
 
-The **Agent bot** tab demonstrates the split approval model for an app-owned execution identity:
-workspace approval creates one bot for the exact parent installation, while separate Room approvals
-allow joining that bot and reading its safe identity in the current Room. The Room actions accept no
-Room, bot, or token selector; the Hub derives authority from the verified invocation and active Room
-binding. Bot-key provisioning remains a separate Sandbox operation.
+The dashboard has two always-visible tabs and two grouped menus. Every tab except **Company** is
+mounted lazily on first visit, and every tab that polls does so only while it is the visible tab
+(3 s interval, paused when the browser tab is hidden).
 
-See [`src/ui/agent-bot-panel.tsx`](src/ui/agent-bot-panel.tsx) for the three tool calls,
-[`privos-app.json`](privos-app.json) for their permission declarations, and
-[`SCOPES.md`](SCOPES.md) for the approval rationale and degraded behavior.
+| Group | Tab | What it does | Permissions it uses |
+|---|---|---|---|
+| — | **Company** | Company home: room context and an AI-generated company summary. | `basic:information`, `sandbox:ai-chat`, `sandbox:ai-chat:write` |
+| — | **Email** | Email history mailbox (sent/failed, retry) plus the interview email templates. | `lists:read`, `lists:write`, `files:read`, `files:write` |
+| HR | **Tuyển dụng** | Browse the job descriptions stored in the room. | `files:read` |
+| HR | **CV Pipeline** | Upload CVs, pick a JD, score them with the sandbox AI, write the result markdown back to `outputs-cv/`. | `files:read`, `files:write`, `lists:write`, `sandbox:ai-chat`, `sandbox:ai-chat:write` |
+| HR | **CV đã chấm** | Kanban of scored candidates; drag between stages, send interview invitations. | `lists:read`, `lists:write` |
+| HR | **Chỉnh sửa JD** | JD editor with a drafting chatbot. | `files:read`, `files:write` |
+| Hành chính | **Hồ sơ NS** | Employee lifecycle: create and track employee profiles. | `lists:read`, `lists:write`, `files:write` |
+| Hành chính | **Quản lý Lương** | Payroll records and exports. Visible only to room owners. | `db:read`, `db:write`, `db:schema:read`, `db:schema:write` |
+| Hành chính | **Bot soạn thảo** | Document drafting from ND30, HR and internal templates; DOCX export. | `files:read` |
 
-## Isolated list, multi-user assignment demo
+Most tabs call the mediated `mcpapp.*` tools as the **current user**, so the Hub gates them by the
+installation grant. Two families are different — `hrm.payroll.*` and `hrm.mail.*` are app-owned
+tools that reach the Hub with the **installation-bot credential**. Both fail closed without a
+Hub-verified actor and pin every Hub request to `actor.roomId`, never to a caller-supplied room.
+See [`SCOPES.md`](SCOPES.md) for the declaration-to-call-site map.
 
-The **Isolated ASSIGNEE** tab demonstrates assigning several users at once to an item on an
-isolated list. The field type that controls who can see an item is **`ASSIGNEE`**
-(`apps/meteor/server/core-typings/IList.ts` in the Hub) — some older docs name `USER_SELECT` or
-`MEMBER_SELECT` instead, but neither field type exists in the Hub; using either name will not
-create a working assignment field. One `ASSIGNEE` field accepts a bare user-id string, a `{ _id }`
-object, or an **array** of either, so a single field can hold several assignees
-(`getAssignedUserIds`, `apps/meteor/app/api/server/lib/isolated-list-item-filter.ts:23-41`).
+The whole-app light/dark sync (the `data-theme` attribute plus the `--bg`/`--text`/`--accent`
+indirection) lives in `src/ui/theme-provider.tsx` and `src/ui/contact-form-styles.css`;
+`PrivosAppProvider` additionally applies the Hub's `--base-*` design tokens onto `<html>` before any
+app code runs.
 
-For an isolated list, the Hub shows an item only to the room owner/admin, the item's creator, and
-whoever is listed in its `ASSIGNEE` field(s) (same file, the visibility check that consumes
-`getAssignedUserIds`) — nobody else in the room. The demo runs, in order: `mcpapp.lists.create`
-(`isolatedList: true`, caller must be room owner/admin) → `mcpapp.lists.addField` (type
-`ASSIGNEE`) → `mcpapp.lists.createItem` → `mcpapp.lists.updateCustomField` (writes an array of
-user ids) → `mcpapp.lists.getItems` (reads the item back and confirms every assigned id was
-stored, not just the first one). See [`src/ui/assignee-demo-panel.tsx`](src/ui/assignee-demo-panel.tsx)
-for the calls and [`src/ui/assignee-demo-helpers.ts`](src/ui/assignee-demo-helpers.ts) for the
-pure id-list parsing tested in [`tests/assignee-demo-helpers.spec.ts`](tests/assignee-demo-helpers.spec.ts).
+## Operating prerequisites
 
-Scope: only the already-declared `lists:write` (optional, room owner/admin for the isolated-list
-create step) and `lists:read` (required) — no new permission is requested.
+These are configuration, not code — without them the app builds and serves but the payroll and mail
+features fail at runtime:
 
-**Argument shapes — checked against the Hub's own tool schemas** in
-`apps/meteor/server/services/mcp-tool-handlers-lists.ts`:
-
-| Tool | Arguments |
-|------|-----------|
-| `mcpapp.lists.create` | `roomId`, `name`, `key?`, `description?`, `isolatedList?`, `fieldDefinitions[]`, `stages[]` |
-| `mcpapp.lists.addField` | `listId`, `name`, `type`, `fieldId?` |
-| `mcpapp.lists.createItem` | `listId`, **`title`** (not `name`), `description?`, `customFields[]`, `stageId?` |
-| `mcpapp.lists.updateCustomField` | `itemId`, `fieldId`, `value` |
-| `mcpapp.lists.getItems` | `listId`, `offset?`, `count?`, `sortBy?`, `sortOrder?`, `stageId?`, `customFieldFilters[]?` |
-
-The shapes come from the schema definitions; the end-to-end flow itself has **not** been run
-against a live Hub (this sandbox has none), so treat the response shapes — as opposed to the
-request shapes — as the part still worth confirming on a real installation.
-
-**Verify isolation with two accounts** (manual, needs a real Hub installation):
-
-1. As account A (room owner/admin), open this app in a Room and run the demo on the **Isolated
-   ASSIGNEE** tab, entering account A's and account B's user ids (each account's id is shown on
-   its own **Identity** tab).
-2. As account B, open the same list. The item should be visible — B is an assignee.
-3. As account C, a third room member who is not the room owner/admin, not the item's creator, and
-   not listed in the ASSIGNEE field, open the same list. The item should **not** be visible.
-4. Re-run `mcpapp.lists.updateCustomField` to remove C from nobody's assignment (or add C), and
-   confirm C's visibility flips accordingly — this is what proves the ASSIGNEE field, not room
-   membership, gates isolated-list item visibility.
-
-### Custom permissions tab — per-record authorization for your app's data
-
-This tab is the worked example of a reusable pattern: **give your app a per-record "who can read /
-who can edit" model without writing a permission engine.** Store your records on an **isolated list**
-(so they are private by default), then attach **role grants** to individual records with the
-`additionalReaders` (Readable) / `additionalEditors` (Editable) fields. The Hub computes the row-level
-ACL at every read/write:
-
-| Capability | Who gets it |
-|---|---|
-| **READ** a record | creator ∪ assignee ∪ room owner/admin ∪ holder of any permission id in `additionalReaders` **or** `additionalEditors` (read cascades to sub-items) |
-| **WRITE** a record (edit/move/delete) | creator ∪ assignee ∪ room owner/admin ∪ holder of any permission id in `additionalEditors` (write does **not** cascade) |
-
-A "role" is a **room custom permission** (a named label an owner/admin assigns to human members).
-Grant a record to a role by putting the permission id into the record's Readable/Editable list; every
-holder then gains access, and revoking the permission removes it immediately. On a non-isolated list
-these fields are inert. Full builder guide — written as an implementable spec you can hand to a
-coding agent (AI-agent callout, MUST/MUST NOT rules, exact tool argument tables, an implementation
-checklist, and verification):
-[`privos-dev-docs/APP_AUTHORIZATION_WITH_ISOLATED_LISTS.md`](https://github.com/PrivOS-AI/privos-dev-docs/blob/main/APP_AUTHORIZATION_WITH_ISOLATED_LISTS.md).
-
-The tab walks the full loop — an owner/admin defines a named permission and assigns it to members,
-then grants an isolated-list item's `additionalReaders` / `additionalEditors` to that permission so its
-holders can read (or read+edit) the item without being its creator or assignee. Flow:
-
-1. **Setup** (current-user REST, owner/admin — no app scope): `POST rooms.customPermissions.create`
-   then `POST rooms.customPermissions.assign`.
-2. **Read** (`custom-permissions:read`): `mcpapp.rooms.customPermissions.list` +
-   `mcpapp.rooms.customPermissions.members`.
-3. **Grant** (`custom-permissions:write`): create an isolated list + item, then
-   `mcpapp.rooms.customPermissions.setItemAccess` with the permission id in `additionalReaders`
-   (read-only) or `additionalEditors` (read+edit).
-
-`setItemAccess` still requires the acting user to be room owner/admin and every id to exist in the
-room catalog — the Hub enforces both regardless of the granted scope. Minting/assigning permissions
-is deliberately NOT an app-scoped operation; it stays a human owner/admin action via REST. See
-[`src/ui/custom-permissions-panel.tsx`](src/ui/custom-permissions-panel.tsx) and the pure grant-patch
-helpers in [`src/ui/custom-permissions-helpers.ts`](src/ui/custom-permissions-helpers.ts)
-(tested in [`tests/custom-permissions-helpers.spec.ts`](tests/custom-permissions-helpers.spec.ts)).
-
-| Tool | Arguments |
-|------|-----------|
-| `mcpapp.rooms.customPermissions.list` | `roomId?` (defaults to approved room) |
-| `mcpapp.rooms.customPermissions.members` | `roomId?`, `permissionId` |
-| `mcpapp.rooms.customPermissions.setItemAccess` | `itemId`, `additionalReaders?`, `additionalEditors?` |
-
-## App Platform demo tabs (Step-1 generic platform contract)
-
-### Notification tab
-
-The **Notification** tab demonstrates the room-scoped `mcpapp.notifications.create` built-in Hub tool. Enter a user ID belonging to the current room, a title, and a message, then select **Send notification**. The tool requires optional `notifications:write` consent; the Hub—not the app—selects the authorized room and rejects inactive users or users outside that room. A successful call creates the notification bell record and triggers native mobile and Web Push delivery on a best-effort basis.
-
-Four tabs demonstrate capabilities that landed in the merged hub `bff01ee8` (Step-1 generic
-platform contract). **They are code-ready but exercise the live contract only once this room's
-Hub runs a tenant image built from that merge (tenant.132+) — on an older Hub these calls fail
-with an unknown-tool or unknown-route error, not a bug in this app.**
-
-### Attempt lifecycle
-
-The **Attempt lifecycle** tab (`src/ui/attempt-lifecycle-panel.tsx` +
-`src/ui/attempt-observation-section.tsx`) runs as the current user, under the already-approved
-`sandbox:generate` scope — no new permission (the hub's `mcp-rest-allowlist.ts` maps all of
-`generate-async` / `attempt-status` / `attempt-observation` / `attempt-cancel` / `attempt-evidence`
-to that one scope):
-
-- `agents.sandbox.attempt-observation` — phase, pending-question, bounded `output` (plus an
-  `outputTruncated` flag), and timestamps for one attempt. Field names match the Hub's own
-  `IAttemptObservation` exactly (`privos-sandbox-agent-service.ts` in privos-hub) — there is no
-  `logs` field.
-- `agents.sandbox.attempt-cancel` — a real worker cancel; the returned status is
-  worker-authoritative and never rewrites an already-completed/failed attempt to `cancelled`.
-- Caller-stable `operationId` idempotency on `agents.sandbox.generate-async`: the tab dispatches
-  once, then re-dispatches the SAME `operationId` with the SAME request and shows the returned
-  `attemptId` converges on the first attempt, then re-dispatches the SAME `operationId` with a
-  CHANGED prompt and shows the Hub fails that closed (an `operationId` bound to one request can
-  never silently rebind to a different one).
-
-### Attempt evidence
-
-The **Attempt evidence** tab (`src/ui/attempt-evidence-panel.tsx`) reads
-`agents.sandbox.attempt-evidence` for one attemptId (paste one from the Attempt lifecycle tab),
-showing the recorded LLM/gateway calls: model, provider, effort, turn, correlation. Same
-`sandbox:generate` scope; no new permission.
-
-### App Objects (CAS) and App Database
-
-The **App Objects (CAS)** tab (`src/ui/app-objects-panel.tsx`) and **App Database** tab
-(`src/ui/app-db-panel.tsx`) are the one exception to "every tab runs as the current user": these
-MCP tools (`mcpapp.objects.put`/`.head`/`.get`, `mcpapp.db.registerCollection`/`.create`/`.query`/
-`.getSchema`) are reached only through `POST /api/v1/mcp-apps.tool-call`, and this app calls that
-endpoint authenticated with **its own installation-bot credential** (`PRIVOS_AGENT_BOT_CREDENTIAL`
-/ `PRIVOS_AGENT_BOT_USER_ID`, the same reserved env pair `agent-bot-credential-check.ts` already
-validates), never the current user's session. The frontend calls this app's own backend tools
-`hr_app_object_store` / `hr_app_db_store`; the backend then makes the bot-credential call
-server-side:
-
-- `resolve-own-mcp-app-id.ts` — resolves this app's own `mcpAppId` (mode-aware, mirrors
-  `resolve-hub-origin.ts`).
-- `app-platform-tool-call.ts` — the shared bot-credential transport, built on the SDK's own
-  `createAgentBotHubClient`. Mirrors the reference consumer, legal-agent's
-  `hub-db-object-store.ts`, byte for byte: same endpoint, same body shape
-  (`{ mcpAppId, toolName, arguments, roomId }`).
-- `app-objects-demo-tool.ts` / `app-db-demo-tool.ts` — the two backend tool handlers.
-
-**App Objects (CAS)**: `put` computes the sha256 digest of the given bytes itself and sends it as
-`sha256:<64hex>` — the Hub independently re-verifies content == digest and rejects a mismatch on
-its own side; this panel also re-verifies the digest of what `get` reads back, client-side, on top
-of that. Objects are immutable and room-private; a repeated `put` of identical bytes is an
-"adopt", not a conflict.
-
-**App Database**: a fixed demo collection (`hr_demo_notes`, room-scoped) is registered once per
-room, then create/query/getSchema round-trip a small `{ label, note }` record.
-
-New optional permissions this adds to the manifest: `db:read`, `db:write`, `db:schema:read`,
-`db:schema:write` — see [`SCOPES.md`](SCOPES.md) for the exact call-site map and
-[`privos-app.json`](privos-app.json) for the declarations.
-
-## Theme inheritance
-
-The **Theme inheritance** tab (`src/ui/theme-inheritance-panel.tsx`) is a visible showcase of
-workspace theme inheritance — no permission involved. The Hub pushes the current light/dark mode
-plus a curated set of 12 `--base-*` design tokens (primary colour, backgrounds, border, text,
-link colour, corner radius, font family) over the same non-secret `HOST_CONTEXT_CHANGED` bridge
-push that carries `theme`/`roomId`, re-sent on every mode flip and on a live admin theme save.
-`@privos_ai/app-react`'s `PrivosAppProvider` (`^0.6.0`) applies every token onto this document's
-`<html>` as a real CSS custom property automatically, before any app code runs.
-
-The tab renders:
-- the current mode (`light`/`dark`) and a legend of all 12 tokens — a colour swatch and the
-  resolved value for colour tokens, a shape/text sample and the resolved value for radius/font;
-- a primary button, a bordered card, and a link, styled purely through `var(--base-*)` — change
-  the workspace theme (or flip light/dark) while this tab is open and they restyle live, with zero
-  reload and zero app-side event handling;
-- a one-line note when the host doesn't provide `themeTokens` (older Hub, or the app running
-  standalone outside a Privos workspace), so the degraded case is visible too.
-
-Whole-app theme sync (the `data-theme` attribute + this file's own `--bg`/`--text`/`--accent`
-indirection) is a separate, older mechanism — see `theme-provider.tsx` and
-`contact-form-styles.css`. This tab exists to make the newer, richer `--base-*` token contract
-demonstrably visible on its own.
+1. **Agent-bot credential.** A workspace admin must provision `PRIVOS_AGENT_BOT_CREDENTIAL` and
+   `PRIVOS_AGENT_BOT_USER_ID` for the installation (Admin → Apps → app → Settings). `hrm.payroll.*`
+   and `hrm.mail.*` call the Hub with this credential.
+2. **Bot room membership.** The app's agent bot must be a member of the room being used. The Hub
+   verifies the bot's membership whenever a `roomId` is passed.
+3. **Paired in dev.** Run `npm run dev` and paste the pairing URL once so `.env` carries
+   `MCP_APP_ID` — `resolveOwnMcpAppId()` needs it before any mediated tool call can be made.
+4. **EmailJS non-browser access.** The EmailJS account must have *Allow EmailJS API for non-browser
+   applications* enabled; the server relay authenticates with the private key as `accessToken`.
+   Set `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID`, `EMAILJS_PUBLIC_KEY` and `EMAILJS_PRIVATE_KEY`.
 
 ## License behavior
 
@@ -500,6 +344,12 @@ version; the Portal validates it at submission and the reviewer sees every secre
 | `HRM_COMPANY_NAME` | yes | no | Company name in the dashboard header. |
 | `HRM_LOCALE` | no | no | BCP-47 locale for dates and currency; the app defaults to `en-US`. |
 | `HRM_SMTP_PASSWORD` | no | **yes** | SMTP password for payslip mail. |
+| `PRIVOS_AGENT_BOT_CREDENTIAL` | yes | **yes** | Installation-bot credential used by `hrm.payroll.*` and `hrm.mail.*` to reach the Hub. |
+| `PRIVOS_AGENT_BOT_USER_ID` | yes | no | User id of that installation bot. |
+| `EMAILJS_SERVICE_ID` | yes | **yes** | EmailJS service id for the server-side mail relay. |
+| `EMAILJS_TEMPLATE_ID` | yes | **yes** | EmailJS template id; must expose `name`, `to_name`, `to_email`, `subject`, `message`. |
+| `EMAILJS_PUBLIC_KEY` | yes | **yes** | EmailJS public key (`user_id`) for the relay account. |
+| `EMAILJS_PRIVATE_KEY` | yes | **yes** | EmailJS private key sent as `accessToken`; required for non-browser API calls. |
 
 Two rules this app demonstrates, and every publisher should follow:
 

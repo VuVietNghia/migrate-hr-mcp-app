@@ -1,9 +1,9 @@
 {
   "name": "ai.privos.mcp-app-demo-can-run",
-  "version": "2.17.5",
+  "version": "3.0.0",
   "type": "module",
   "private": false,
-  "description": "Reference PrivOS MCP app demonstrating HR workflows, scoped workspace APIs, AI and sandbox controls, and license-aware features.",
+  "description": "HR Mini App for PrivOS: recruitment pipeline with AI CV scoring, scored-CV kanban, JD editor, employee lifecycle, payroll, drafting bot and email history.",
   "title": "PrivOS Demo MCP App Can Run",
   "icon": "/public/icon.svg",
   "homepage": "https://privos.ai",
@@ -49,10 +49,13 @@
     "docker:run": "docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 100 --tmpfs /tmp -e PORT=3000 privos-mcp-app-demo:local"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.2",
     "@privos_ai/app-server": "^0.10.0",
+    "docx": "^9.7.1",
     "dotenv": "^17.3.1",
     "tsx": "^4.0.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@privos_ai/app-react": "^0.6.0",

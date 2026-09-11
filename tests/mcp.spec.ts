@@ -13,42 +13,16 @@ describe('JSON-RPC handlers', () => {
     const listed = await handleMcpMessage('tools/list', 2, {});
     expect(listed.tools.map((tool: any) => tool.name)).toContain('hr_bulk_export');
     expect(listed.tools.map((tool: any) => tool.name)).toContain('hr_agent_bot_credential_check');
-    expect(listed.tools.map((tool: any) => tool.name)).toContain('hr_app_object_store');
-    expect(listed.tools.map((tool: any) => tool.name)).toContain('hr_app_db_store');
+    expect(listed.tools.map((tool: any) => tool.name)).toContain('hrm.payroll.query');
+    expect(listed.tools.map((tool: any) => tool.name)).toContain('hrm.mail.send');
     const whoami = listed.tools.find((tool: any) => tool.name === 'hr_whoami');
     expect(whoami.inputSchema).toEqual({ type: 'object', properties: {} });
   });
 
-  it('validates hr_app_object_store arguments before ever calling the Hub', async () => {
-    const missingRoom = await handleMcpMessage('tools/call', 6, {
-      name: 'hr_app_object_store',
-      arguments: { action: 'put', roomId: '', dataBase64: 'aGk=', mediaType: 'text/plain' },
-    }).catch((err: Error) => err);
-    expect(missingRoom).toBeInstanceOf(Error);
-    expect((missingRoom as Error).message).toContain('roomId is required');
-
-    const missingDigest = await handleMcpMessage('tools/call', 7, {
-      name: 'hr_app_object_store',
-      arguments: { action: 'get', roomId: 'room-1' },
-    }).catch((err: Error) => err);
-    expect(missingDigest).toBeInstanceOf(Error);
-    expect((missingDigest as Error).message).toContain('digest is required');
-  });
-
-  it('validates hr_app_db_store arguments before ever calling the Hub', async () => {
-    const missingRoom = await handleMcpMessage('tools/call', 8, {
-      name: 'hr_app_db_store',
-      arguments: { action: 'query', roomId: '' },
-    }).catch((err: Error) => err);
-    expect(missingRoom).toBeInstanceOf(Error);
-    expect((missingRoom as Error).message).toContain('roomId is required');
-
-    const missingLabel = await handleMcpMessage('tools/call', 9, {
-      name: 'hr_app_db_store',
-      arguments: { action: 'create', roomId: 'room-1' },
-    }).catch((err: Error) => err);
-    expect(missingLabel).toBeInstanceOf(Error);
-    expect((missingLabel as Error).message).toContain('label is required');
+  it('fails closed on hrm.payroll.* without a verified actor', async () => {
+    const rejected = await handleMcpMessage('tools/call', 30, { name: 'hrm.payroll.query', arguments: { roomId: 'room-1' } }).catch((e: Error) => e);
+    expect(rejected).toBeInstanceOf(Error);
+    expect((rejected as Error).message).toContain('verified caller identity');
   });
 
   it('routes hr_agent_bot_credential_check to the credential self-check, reporting absent env as not-configured', async () => {
