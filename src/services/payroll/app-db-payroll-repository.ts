@@ -5,41 +5,17 @@ import {
 	type PayrollDocument,
 	type PayrollInput,
 } from './payroll-repository';
+import {
+	PAYROLL_FIELDS,
+	PAYROLL_INDEXES,
+	byCreatedAtDesc,
+	isAlreadyRegisteredError,
+} from './payroll-schema';
 
-/** Schema is fixed here; `mcpapp.db.registerCollection` enforces it server-side on every write. */
-const PAYROLL_FIELDS = [
-	{ name: 'roomId', type: 'string', required: true, maxLength: 64 },
-	{ name: 'employeeId', type: 'string', required: true, maxLength: 64 },
-	{ name: 'baseSalary', type: 'number', required: true, min: 0 },
-	{ name: 'taxId', type: 'string', maxLength: 32 },
-	{ name: 'bankAccount', type: 'string', maxLength: 64 },
-	{ name: 'bankName', type: 'string', maxLength: 128 },
-	{ name: 'contractType', type: 'string', maxLength: 64 },
-	{ name: 'applyProbationRate', type: 'boolean' },
-	{ name: 'probationRate', type: 'number', min: 0, max: 100 },
-] as const;
-
-/**
- * Index uses: queryByRoom (roomId prefix, then employeeId as the paging sort key); uniqueness of
- * one payroll row per employee per room. Fixed at registerCollection time — `mcpapp.db.updateSchema`
- * takes `fields` only, so changing this index would require dropping the collection and its data.
- */
-const PAYROLL_INDEXES = [{ fields: { roomId: 1, employeeId: 1 }, unique: true }] as const;
-
-/** The hub caps one `mcpapp.db.query` response at 1000 docs (tools-database.md — Limits). */
-export const PAYROLL_PAGE_SIZE = 1000;
-
-/** 10 × 1000 = the hub's 10,000 count cap. A hard stop so a misbehaving page never loops forever. */
-export const PAYROLL_MAX_PAGES = 10;
-
-/**
- * Newest first. `_createdAt` is hub-assigned and is NOT a registered schema field, so sending it to
- * `orderBy` risks the documented `Unknown field` error — the display order is applied here instead.
- * Documents without `_createdAt` sort last.
- */
-function byCreatedAtDesc(a: PayrollDocument, b: PayrollDocument): number {
-	return (b._createdAt ?? '').localeCompare(a._createdAt ?? '');
-}
+// Re-exported so existing importers keep their call site; the values live in `payroll-schema.ts`
+// because the UI's PayrollService registers and pages the same collection over the user-session relay.
+export { PAYROLL_MAX_PAGES, PAYROLL_PAGE_SIZE } from './payroll-schema';
+import { PAYROLL_MAX_PAGES, PAYROLL_PAGE_SIZE } from './payroll-schema';
 
 function asRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -57,9 +33,7 @@ export class AppDbPayrollRepository implements IPayrollRepository {
 				indexes: PAYROLL_INDEXES,
 			});
 		} catch (error) {
-			// registerCollection is not idempotent on the Hub — re-running in the same room throws.
-			const message = error instanceof Error ? error.message : String(error);
-			if (!/already registered/i.test(message)) throw error;
+			if (!isAlreadyRegisteredError(error)) throw error;
 		}
 	}
 

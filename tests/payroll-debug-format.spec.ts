@@ -1,23 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { PAYROLL_TOOL_NAMES } from '../src/payroll-tools';
+import { PAYROLL_COLLECTION } from '../src/services/payroll/payroll-repository';
+import { PAYROLL_PAGE_SIZE } from '../src/services/payroll/payroll-schema';
 import { buildPayrollDebugRequest, formatPayrollDebugOutput } from '../src/ui/payroll/debug-format';
 
 describe('buildPayrollDebugRequest', () => {
-  it('targets a real hrm.payroll tool', () => {
+  it('reproduces the first page PayrollService reads, not a different tool', () => {
     const request = buildPayrollDebugRequest('room-1');
-    expect(PAYROLL_TOOL_NAMES as readonly string[]).toContain(request.name);
-    expect(request.name).toBe('hrm.payroll.query');
+    expect(request.name).toBe('mcpapp.db.query');
+    expect(request.arguments).toEqual({
+      collection: PAYROLL_COLLECTION,
+      where: [{ field: 'roomId', op: '==', value: 'room-1' }],
+      orderBy: [{ field: 'employeeId', direction: 'asc' }],
+      limit: PAYROLL_PAGE_SIZE,
+      offset: 0,
+    });
   });
 
-  it('sends roomId and nothing else — hrm.payroll.query accepts no other argument', () => {
-    const request = buildPayrollDebugRequest('room-1');
-    expect(request.arguments).toEqual({ roomId: 'room-1' });
-  });
-
-  it('does not leak mcpapp.db.query arguments into an app tool call', () => {
-    const request = buildPayrollDebugRequest('room-1');
-    expect(Object.keys(request.arguments)).not.toContain('collection');
-    expect(Object.keys(request.arguments)).not.toContain('where');
+  it('never orders by a hub-assigned underscore field', () => {
+    const orderBy = buildPayrollDebugRequest('room-1').arguments.orderBy as Array<{ field: string }>;
+    expect(orderBy.some((clause) => clause.field.startsWith('_'))).toBe(false);
   });
 });
 
@@ -27,7 +28,7 @@ describe('formatPayrollDebugOutput', () => {
     const parsed = JSON.parse(formatPayrollDebugOutput({ roomId: 'room-1', request, result: { records: [] } }));
     expect(parsed.status).toBe('success');
     expect(parsed.roomId).toBe('room-1');
-    expect(parsed.request).toEqual({ name: 'hrm.payroll.query', arguments: { roomId: 'room-1' } });
+    expect(parsed.request).toEqual(request);
     expect(parsed.result).toEqual({ records: [] });
     expect(parsed.error).toBeUndefined();
   });
