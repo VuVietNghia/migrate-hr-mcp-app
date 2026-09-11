@@ -115,6 +115,25 @@ export async function getFileContent(app: McpApp, path: string): Promise<string>
   }
 }
 
+/**
+ * Lists the file names present in a Room Files folder, for existence checks that
+ * shouldn't depend on fetching (and being able to parse) each file's content.
+ * Returns `null` when the listing call itself fails, so callers can tell "folder
+ * is empty" apart from "couldn't determine what's there" and avoid treating a
+ * transient error as "nothing exists yet".
+ */
+export async function listFileNames(app: McpApp, folderPath: string): Promise<Set<string> | null> {
+  try {
+    const res = await app.rest({ method: 'GET', path: 'api/files/list', query: { path: folderPath } } as any);
+    const body: any = res?.body ?? res;
+    const files: any[] = Array.isArray(body?.files) ? body.files : [];
+    return new Set(files.map((f) => f?.name).filter((name: unknown): name is string => typeof name === 'string'));
+  } catch (err) {
+    console.error('Failed to list files', err);
+    return null;
+  }
+}
+
 export async function ensureFolderPath(app: McpApp, channelId: string, folderNames: string[]): Promise<string | undefined> {
   let currentParentId: string | undefined = undefined;
 

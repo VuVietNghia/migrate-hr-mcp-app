@@ -37,7 +37,7 @@ type SectionId = 'hr' | 'admin';
  *   basic:information      → room/user context for every tab (usePrivosContext)
  *   lists:read / lists:write → candidate, employee, email-history lists (mcpapp.lists.*)
  *   files:read / files:write → JD, CV, template, export files (mcpapp.files.*, uploadFile)
- *   db:read / db:write / db:schema:read / db:schema:write → payroll (hrm.payroll.* → mcpapp.db.*)
+ *   db:read / db:write / db:schema:read / db:schema:write → payroll (PayrollService → mcpapp.db.*)
  *   sandbox:ai-chat / sandbox:ai-chat:write → CV scoring + company summary (ai-messages.*)
  */
 type TabDef = { id: Tab; label: string; scopes: readonly string[] };

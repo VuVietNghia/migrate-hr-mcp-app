@@ -1,9 +1,9 @@
 {
   "schemaVersion": 3,
   "kind": "mcp-app",
-  "name": "ai.privos.mcp-app-demo-hr-hrm",
+  "name": "ai.privos.mcp-app-hr",
   "version": "3.0.0",
-  "title": "HR & HRM MCP",
+  "title": "PrivOS HR MCP App",
   "description": "HR Mini App for PrivOS: recruitment pipeline with AI CV scoring, scored-CV kanban, JD editor, employee lifecycle, payroll, drafting bot and email history.",
   "icon": "/public/icon.svg",
   "author": {

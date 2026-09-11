@@ -261,53 +261,23 @@ async function scanDirectory(dir: string, fileList: string[] = []) {
 }
 
 // ==========================================
-// MAIN SYNC FUNCTION
+// Diff local files against the last known remote state (no uploads here)
 // ==========================================
-async function runCheck() {
-    initializeRuntimeConfig();
+interface ChangedFile {
+    s3Key: string;
+    filePath: string;
+    reason: string;
+}
 
-    // Preferred path: enqueue into server-side push queue (records jobs in push-sync-state.db)
-    const enqueued = await enqueuePushJob();
-    if (enqueued) {
-        return;
-    }
-
-    console.error("⚠️ Queue enqueue failed on all endpoints, falling back to direct upload mode.");
-
-    await ensureTmpDir(); // Create tmp directory before running
-    console.error(`🔍 Starting to scan files in '${LOCAL_DATA_DIR}' and compare with '${STATE_FILE}'...`);
-
-    // Read state file (created by pull-sync)
-    let manifestData: ManifestEntry[] = [];
-    try {
-        manifestData = JSON.parse(await fs.readFile(STATE_FILE, "utf-8"));
-    } catch {
-        console.error(`❌ '${STATE_FILE}' not found. Run pull sync first!`);
-        return;
-    }
-
-    const allFiles = await scanDirectory(LOCAL_DATA_DIR);
-    if (allFiles.length === 0) {
-        console.error(`❌ Directory '${LOCAL_DATA_DIR}' is completely empty!`);
-        return;
-    }
-
-    console.error(`\n=================== STEP 2: UPLOAD NEW & CHANGED FILES ===================`);
-
-    // Map key → ManifestEntry for quick lookup
+async function computeChangedFiles(manifestData: ManifestEntry[], allFiles: string[]): Promise<ChangedFile[]> {
     const manifestMap = new Map<string, ManifestEntry>();
     for (const entry of manifestData) {
         manifestMap.set(entry.key, entry);
     }
 
-    let newFiles = 0;
-    let changedFiles = 0;
-    let unchangedFiles = 0;
-
+    const changed: ChangedFile[] = [];
     const MAX_CONCURRENT_CHECKS = 10;
     const limit = createConcurrencyLimit(MAX_CONCURRENT_CHECKS);
-
-    console.error(`Analyzing ${allFiles.length} local files...`);
 
     const checkTasks = allFiles.map((filePath) =>
         limit(async () => {
@@ -322,34 +292,76 @@ async function runCheck() {
             const manifestEntry = manifestMap.get(s3Key);
 
             if (!manifestEntry) {
-                console.error(`\n📝 [NEW FILE] ${s3Key}`);
-                await uploadFile(s3Key, filePath);
-                newFiles++;
+                changed.push({ s3Key, filePath, reason: "NEW FILE" });
             } else if (stats.size !== manifestEntry.size) {
-                console.error(`\n🔄 [SIZE CHANGED] ${s3Key} (Local: ${stats.size}, Remote: ${manifestEntry.size})`);
-                await uploadFile(s3Key, filePath);
-                changedFiles++;
+                changed.push({ s3Key, filePath, reason: `SIZE CHANGED (Local: ${stats.size}, Remote: ${manifestEntry.size})` });
             } else {
                 const localMtime = stats.mtime.getTime();
                 const s3Mtime = new Date(manifestEntry.lastModified).getTime();
 
                 if (localMtime > s3Mtime + 2000) {
-                    console.error(`\n⏳ [TIME CHANGED] ${s3Key}`);
-                    await uploadFile(s3Key, filePath);
-                    changedFiles++;
-                } else {
-                    unchangedFiles++;
+                    changed.push({ s3Key, filePath, reason: "TIME CHANGED" });
                 }
             }
         })
     );
 
     await Promise.all(checkTasks);
+    return changed;
+}
 
-    console.error(`\n🎉 SYNC CHECK COMPLETE:`);
-    console.error(`   - New files   : ${newFiles}`);
-    console.error(`   - Changed     : ${changedFiles}`);
-    console.error(`   - Unchanged   : ${unchangedFiles}`);
+// ==========================================
+// MAIN SYNC FUNCTION
+// ==========================================
+async function runCheck() {
+    initializeRuntimeConfig();
+
+    console.error(`🔍 Starting to scan files in '${LOCAL_DATA_DIR}' and compare with '${STATE_FILE}'...`);
+
+    // Read state file (created by pull-sync). Without it we have nothing to diff
+    // against, so we skip the sync entirely rather than upload blindly.
+    let manifestData: ManifestEntry[];
+    try {
+        manifestData = JSON.parse(await fs.readFile(STATE_FILE, "utf-8"));
+    } catch {
+        console.error(`⚠️ '${STATE_FILE}' not found — cannot tell what changed, skipping sync this run. It will sync automatically once pull sync has produced a state file.`);
+        return;
+    }
+
+    const allFiles = await scanDirectory(LOCAL_DATA_DIR);
+    if (allFiles.length === 0) {
+        console.error(`❌ Directory '${LOCAL_DATA_DIR}' is completely empty!`);
+        return;
+    }
+
+    console.error(`Analyzing ${allFiles.length} local files...`);
+    const changedFiles = await computeChangedFiles(manifestData, allFiles);
+
+    if (changedFiles.length === 0) {
+        console.error(`✅ No changes detected, skipping sync.`);
+        return;
+    }
+
+    console.error(`\n=================== ${changedFiles.length} NEW/CHANGED FILE(S) DETECTED ===================`);
+    for (const entry of changedFiles) {
+        console.error(`  📝 [${entry.reason}] ${entry.s3Key}`);
+    }
+
+    // Preferred path: enqueue into server-side push queue (records jobs in push-sync-state.db)
+    const enqueued = await enqueuePushJob();
+    if (enqueued) {
+        return;
+    }
+
+    console.error("⚠️ Queue enqueue failed on all endpoints, falling back to direct upload mode.");
+    await ensureTmpDir();
+
+    console.error(`\n=================== STEP 2: UPLOAD NEW & CHANGED FILES ===================`);
+    const MAX_CONCURRENT_UPLOADS = 10;
+    const limit = createConcurrencyLimit(MAX_CONCURRENT_UPLOADS);
+    await Promise.all(changedFiles.map((entry) => limit(() => uploadFile(entry.s3Key, entry.filePath))));
+
+    console.error(`\n🎉 SYNC CHECK COMPLETE: uploaded ${changedFiles.length} file(s).`);
 }
 
 runCheck().catch(console.error);

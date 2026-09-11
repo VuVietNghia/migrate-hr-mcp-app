@@ -1,4 +1,4 @@
-import { McpApp } from '@privos_ai/app-react';
+import { McpApp, parseToolResult } from '@privos_ai/app-react';
 import { EmployeeProfile, ILifecycleService, PassedCandidate } from '../types';
 
 export class PrivOSLifecycleService implements ILifecycleService {
@@ -10,21 +10,20 @@ export class PrivOSLifecycleService implements ILifecycleService {
   constructor(private app: McpApp) { }
 
   async loadProfiles(roomId: string): Promise<EmployeeProfile[]> {
-    try {
-      const list = await this.ensureValidList(roomId);
-      if (!list) return [];
-
-      const items = await this.fetchListItems(list._id || list.id);
-      const fieldDefMap = this.createFieldDefinitionMap(list.fieldDefinitions);
-
-      // Filter out system items and map to EmployeeProfile
-      return items
-        .filter(item => !this.isSystemConfigItem(item))
-        .map(item => this.mapItemToProfile(item, list, fieldDefMap));
-    } catch (err) {
-      console.error('[PrivOSLifecycleService] Error loading profiles:', err);
-      return [];
+    // Never answer a failure with `[]`. PayrollDashboard reconciles payroll rows
+    // against this roster and hard-deletes the ones it cannot match, so a masked
+    // failure here destroys real salary data.
+    const list = await this.ensureValidList(roomId);
+    if (!list || !(list._id || list.id)) {
+      throw new Error(`Không lấy được danh sách hồ sơ nhân sự hợp lệ của room ${roomId}.`);
     }
+
+    const items = await this.fetchListItems(list._id || list.id);
+    const fieldDefMap = this.createFieldDefinitionMap(list.fieldDefinitions);
+
+    return items
+      .filter(item => !this.isSystemConfigItem(item))
+      .map(item => this.mapItemToProfile(item, list, fieldDefMap));
   }
 
   async loadPassedCandidates(roomId: string): Promise<PassedCandidate[]> {
@@ -204,13 +203,7 @@ export class PrivOSLifecycleService implements ILifecycleService {
       arguments: { roomId }
     });
 
-    const text = res?.content?.[0]?.text;
-    if (!text) {
-      console.log('[PrivOSLifecycleService] No text in response');
-      return null;
-    }
-
-    const parsed = JSON.parse(text);
+    const parsed: any = parseToolResult(res);
     const lists = Array.isArray(parsed) ? parsed : (parsed?.lists || []);
     console.log('[PrivOSLifecycleService] Total lists found:', lists.length);
 
@@ -270,30 +263,29 @@ export class PrivOSLifecycleService implements ILifecycleService {
   }
 
   private async createNewList(roomId: string): Promise<any | null> {
-    try {
-      const res: any = await this.app.callServerTool({
-        name: 'mcpapp.lists.create',
-        arguments: {
-          roomId,
-          name: `${PrivOSLifecycleService.SYSTEM_PREFIX} Hồ sơ nhân sự`,
-          fieldDefinitions: this.getInitialFieldDefinitions(),
-          stages: this.getInitialStages()
-        }
-      });
-
-      const parsed = JSON.parse(res?.content?.[0]?.text || '{}');
-      const newList = parsed.list || parsed || null;
-
-      if (newList && parsed.stages) {
-        await this.createSystemConfigItem(newList._id || newList.id, parsed.stages);
-        newList.stages = parsed.stages;
+    const res: any = await this.app.callServerTool({
+      name: 'mcpapp.lists.create',
+      arguments: {
+        roomId,
+        name: `${PrivOSLifecycleService.SYSTEM_PREFIX} Hồ sơ nhân sự`,
+        fieldDefinitions: this.getInitialFieldDefinitions(),
+        stages: this.getInitialStages()
       }
+    });
 
-      return newList;
-    } catch (err) {
-      console.error('[PrivOSLifecycleService] Failed to create HR List:', err);
-      return null;
+    const parsed: any = parseToolResult(res);
+    const newList = parsed.list || parsed || null;
+
+    if (!newList || typeof newList !== 'object' || !(newList._id || newList.id)) {
+      throw new Error(`mcpapp.lists.create for room ${roomId} returned no usable list id.`);
     }
+
+    if (newList && parsed.stages) {
+      await this.createSystemConfigItem(newList._id || newList.id, parsed.stages);
+      newList.stages = parsed.stages;
+    }
+
+    return newList;
   }
 
   private async createSystemConfigItem(listId: string, stages: any[]): Promise<void> {
@@ -333,10 +325,7 @@ export class PrivOSLifecycleService implements ILifecycleService {
       arguments: { listId, count: 100 }
     });
 
-    const text = res?.content?.[0]?.text;
-    if (!text) return [];
-
-    const parsed = JSON.parse(text);
+    const parsed: any = parseToolResult(res);
     return Array.isArray(parsed) ? parsed : (parsed?.items || []);
   }
 
