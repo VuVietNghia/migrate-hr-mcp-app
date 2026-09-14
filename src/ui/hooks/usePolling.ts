@@ -1,5 +1,17 @@
 import { useEffect, useRef } from 'react';
 
+// Debug escape hatch: disables every usePolling instance app-wide, so the Network tab stays clean
+// while debugging something unrelated. The UI iframe runs at `Origin: null` (sandboxed, no
+// `allow-same-origin`) with its whole document inlined server-side — there is no reachable URL or
+// storage to read a flag from, so the server injects this global directly into the served HTML
+// when started with `PRIVOS_DEBUG_NO_POLL=1` (see renderInlineShell in mcp-message-handlers.ts).
+declare global {
+  interface Window {
+    __PRIVOS_NO_POLL__?: boolean;
+  }
+}
+const DEBUG_NO_POLL = typeof window !== 'undefined' && window.__PRIVOS_NO_POLL__ === true;
+
 export interface UsePollingOptions {
   /**
    * Khoảng thời gian giữa các lần thăm dò (milliseconds).
@@ -46,10 +58,11 @@ export function usePolling(
 ): void {
   const {
     interval = 1000,
-    enabled = true,
+    enabled: enabledOption = true,
     immediate = true,
     pauseOnTabHidden = true,
   } = options;
+  const enabled = enabledOption && !DEBUG_NO_POLL;
 
   // Giữ tham chiếu callback mới nhất để tránh closure cũ mà không trigger re-subscribe effect
   const savedCallback = useRef(callback);

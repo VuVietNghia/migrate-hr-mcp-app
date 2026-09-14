@@ -8,6 +8,13 @@ export const PAYROLL_COLLECTION = 'hr_payroll_records';
 
 export interface PayrollDocument {
 	readonly _id?: string;
+	/**
+	 * Redundant with `scope: 'room'` — the hub already stores this collection per room as
+	 * `app_{appId}_{roomId}_{collection}`, so cross-room reads are physically impossible. Kept as
+	 * defence in depth and as the first key of the unique index. It cannot be removed cheaply:
+	 * `mcpapp.db.updateSchema` takes `fields` only, so dropping the index would require
+	 * `dropCollection` — destroying every live payroll record. Do not "clean this up".
+	 */
 	readonly roomId: string;
 	readonly employeeId: string;
 	readonly baseSalary: number;

@@ -9,7 +9,7 @@ import {
   formatCurrencyPreview, 
   isProbationContract 
 } from '../utils';
-import { formatPayrollDebugOutput } from '../debug-format';
+import { buildPayrollDebugRequest, formatPayrollDebugOutput } from '../debug-format';
 import {
   type IPayrollExportService,
   type PayrollExportDestination,
@@ -216,7 +216,8 @@ export function PayrollDashboard({
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu lương:", error);
       if (!isSilent) {
-        setStatusMsg({ text: 'Lỗi khi tải dữ liệu bảng lương.', type: 'error' });
+        const detail = error instanceof Error ? error.message : String(error);
+        setStatusMsg({ text: `Lỗi khi tải dữ liệu bảng lương: ${detail}`, type: 'error' });
       }
     } finally {
       isRefreshingDataRef.current = false;
@@ -235,13 +236,7 @@ export function PayrollDashboard({
   );
 
   const showRawPayrollDebug = async () => {
-    const request = {
-      name: 'hrm.payroll.query',
-      arguments: {
-        collection: 'payroll_records',
-        where: [{ field: 'roomId', op: '==', value: roomId }]
-      }
-    };
+    const request = buildPayrollDebugRequest(roomId);
 
     try {
       const result = await app.callServerTool(request);

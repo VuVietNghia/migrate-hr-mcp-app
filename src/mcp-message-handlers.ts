@@ -41,12 +41,12 @@ const BULK_EXPORT_TOOL = 'hr_bulk_export';
 // authenticates against the Hub. See agent-bot-credential-check.ts.
 const CREDENTIAL_CHECK_TOOL = 'hr_agent_bot_credential_check';
 /**
- * `ui://<appSlug>/…` — `appSlug` MUST be `app.appId`, i.e. `privos-app.json`'s `name`
- * (`ai.privos.mcp-app-demo-hr-hrm`), never a different, human-friendlier host string. The Hub
- * resolves an app's UI resource from the registered app id, so a mismatch here means the tool
- * renders nothing at all.
+ * Read straight from the manifest rather than rebuilt from `pkg.name`: the Hub pins the declared
+ * `resourceUri` at pairing and asks for exactly that string, so any manifest where the slug and
+ * `name` disagree would make a `name`-derived URI answer a request nobody sends.
  */
-const UI_RESOURCE_URI = `ui://${pkg.name}/form.html`;
+const UI_RESOURCE_URI: string = (pkg.tools as any[]).find((tool) => tool?.name === TOOL_NAME)?.ui?.resourceUri;
+if (!UI_RESOURCE_URI) throw new Error(`privos-app.json declares no ui.resourceUri for tool ${TOOL_NAME}.`);
 
 /**
  * Embed origins this app declares, read straight from the published manifest so the runtime
@@ -106,6 +106,13 @@ function renderInlineShell(): string {
 		if (!src) return tag;
 		return `<script type="module">${escapeForRawTextElement(readDistFile(src, indexPath), 'script')}</script>`;
 	});
+
+	// Debug escape hatch for usePolling.ts: the iframe runs at `Origin: null` with no reachable
+	// URL or storage, so this is the only way to hand it a flag — a plain (non-module) inline
+	// script placed before the bundle, which always runs before any deferred module script.
+	if (process.env.PRIVOS_DEBUG_NO_POLL === '1') {
+		html = html.replace(/<head[^>]*>/i, (tag) => `${tag}<script>window.__PRIVOS_NO_POLL__=true;</script>`);
+	}
 
 	assertNoExternalRefs(html, indexPath);
 	inlineShellHtml = html;
