@@ -112,6 +112,46 @@ export async function getFileTextById(app: McpApp, fileId: string, timeoutMs = 1
   return body.result;
 }
 
+const DOWNLOAD_URL_TIMEOUT_MS = 8000;
+
+/**
+ * Read a room text file (e.g. a JD) by id, falling back to its presigned `downloadUrl`. The fallback
+ * is bounded because the Hub can hand out a MinIO host the browser cannot reach, and an unbounded
+ * fetch then hangs for ~20s before failing. Resolves the text (possibly empty for an empty file);
+ * throws the first failure when neither path could read the file.
+ */
+export async function readRoomFileText(
+  app: McpApp,
+  file: { _id?: string; downloadUrl?: string },
+  downloadTimeoutMs = DOWNLOAD_URL_TIMEOUT_MS,
+): Promise<string> {
+  let firstError: unknown;
+  let readEmptyFile = false;
+  if (file._id) {
+    try {
+      const text = await getFileTextById(app, file._id);
+      if (text.trim()) return text;
+      readEmptyFile = true;
+    } catch (error) {
+      firstError = error;
+      console.warn('[File read] file-management content route failed:', error);
+    }
+  }
+  if (file.downloadUrl) {
+    try {
+      const response = await fetch(file.downloadUrl, { signal: AbortSignal.timeout(downloadTimeoutMs) });
+      if (!response.ok) throw new Error(`Download failed (${response.status})`);
+      return await response.text();
+    } catch (error) {
+      firstError = firstError ?? error;
+      console.warn('[File read] downloadUrl fetch failed:', error);
+    }
+  }
+  if (readEmptyFile) return '';
+  if (firstError) throw firstError;
+  throw new PrivosRestError('File has no id or download link');
+}
+
 export async function getFileContent(app: McpApp, path: string): Promise<string> {
   try {
     const res = await app.rest({

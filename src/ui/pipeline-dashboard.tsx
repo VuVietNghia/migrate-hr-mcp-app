@@ -3,10 +3,9 @@ import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { PipelineService, CVFile, ProcessingStatus } from './pipeline-service';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
 import { getCvPipelineDisplayReason } from './cv-pipeline-display-reason';
-import { createOrUpdateFile, describeFeatureError, getFileTextById } from './privos-rest';
+import { createOrUpdateFile, describeFeatureError, readRoomFileText } from './privos-rest';
 import { usePolling } from './hooks/usePolling';
 
-const JD_DOWNLOAD_TIMEOUT_MS = 8000;
 type JdLoadStatus = 'idle' | 'loading' | 'success' | 'error';
 
 // Dependency Injection Interface
@@ -483,30 +482,11 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
     try {
       const baseName = name.split('/').pop()?.split('\\').pop() || name;
       const targetFile = availableJDs.find(f => f.name === name || f.name === baseName || (fileId && f._id === fileId));
-      const resolvedFileId = fileId || targetFile?._id;
       let text = '';
-
-      // Method 1: the Hub's file-management content route, the read path granted to the app.
-      if (resolvedFileId) {
-        try {
-          text = await getFileTextById(app, resolvedFileId);
-        } catch (e) {
-          lastError = e;
-          console.warn('[JD Load] file-management content route failed:', e);
-        }
-      }
-
-      // Method 2: presigned downloadUrl. Bounded, because the Hub can hand out a MinIO host the
-      // browser cannot reach and an unbounded fetch then hangs for ~20s before failing.
-      if (!text.trim() && targetFile?.downloadUrl) {
-        try {
-          const resp = await fetch(targetFile.downloadUrl, { signal: AbortSignal.timeout(JD_DOWNLOAD_TIMEOUT_MS) });
-          if (!resp.ok) throw new Error(`Download failed (${resp.status})`);
-          text = await resp.text();
-        } catch (e) {
-          lastError = lastError ?? e;
-          console.warn('[JD Load] Fetch targetFile.downloadUrl failed:', e);
-        }
+      try {
+        text = await readRoomFileText(app, { _id: fileId || targetFile?._id, downloadUrl: targetFile?.downloadUrl });
+      } catch (e) {
+        lastError = e;
       }
 
       if (!isCurrent()) return text;

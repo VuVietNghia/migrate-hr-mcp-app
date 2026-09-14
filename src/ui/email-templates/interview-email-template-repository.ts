@@ -13,18 +13,11 @@ import {
 import {
   createOrUpdateFile,
   ensureFolderPath,
+  readRoomFileText,
 } from '../privos-rest';
 
 const CANONICAL_TEMPLATE_FILE_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
 const DEFAULT_INTERVIEW_TEMPLATE_ID = 'moi-phong-van-mac-dinh';
-
-type InterviewEmailTemplateFileResponse = {
-  ok: boolean;
-  status: number;
-  text(): Promise<string>;
-};
-
-type InterviewEmailTemplateFileFetcher = (url: string) => Promise<InterviewEmailTemplateFileResponse>;
 
 function isCanonicalTemplateFileName(fileName: string): boolean {
   return CANONICAL_TEMPLATE_FILE_NAME_PATTERN.test(fileName);
@@ -274,7 +267,6 @@ export class PrivosInterviewEmailTemplateFileGateway implements InterviewEmailTe
   constructor(
     private readonly app: McpApp,
     private readonly roomId: string,
-    private readonly fetchFile: InterviewEmailTemplateFileFetcher = url => fetch(url),
   ) {}
 
   async ensureFolder(): Promise<string> {
@@ -296,23 +288,12 @@ export class PrivosInterviewEmailTemplateFileGateway implements InterviewEmailTe
 
   async read(fileName: string, fileId?: string, downloadUrl?: string): Promise<string> {
     assertSafeTemplateGatewayFileName(fileName);
-    let resolvedDownloadUrl = downloadUrl;
-    if (!resolvedDownloadUrl) {
-      if (!fileId) {
-        throw new Error(`Room Files file identity is missing: ${fileName}`);
-      }
-      const response = await this.app.callServerTool({
-        name: 'mcpapp.files.get',
-        arguments: { fileId },
-      });
-      resolvedDownloadUrl = this.parseDownloadUrl(response);
+    if (!fileId && !downloadUrl) {
+      throw new Error(`Room Files file identity is missing: ${fileName}`);
     }
-
-    const downloadResponse = await this.fetchFile(resolvedDownloadUrl);
-    if (!downloadResponse.ok) {
-      throw new Error(`Room Files download failed (${downloadResponse.status})`);
-    }
-    return downloadResponse.text();
+    // The file-management content route first: the presigned downloadUrl can point at a MinIO host
+    // the browser cannot reach, which made every template read time out.
+    return readRoomFileText(this.app, { _id: fileId, downloadUrl });
   }
 
   async write(fileName: string, content: string): Promise<void> {
@@ -358,38 +339,6 @@ export class PrivosInterviewEmailTemplateFileGateway implements InterviewEmailTe
     } catch {
       throw new Error('Invalid Room Files listing response');
     }
-  }
-
-  private parseDownloadUrl(response: unknown): string {
-    const record = this.asRecord(response);
-    if (record?.isError === true) {
-      const errorContent = Array.isArray(record.content) ? record.content : [];
-      const errorText = this.asRecord(errorContent[0])?.text;
-      throw new Error(typeof errorText === 'string' && errorText.trim()
-        ? errorText
-        : 'Room Files file detail request failed');
-    }
-    if (typeof record?.downloadUrl === 'string' && record.downloadUrl) return record.downloadUrl;
-
-    const dataRecord = this.asRecord(record?.data);
-    if (typeof dataRecord?.downloadUrl === 'string' && dataRecord.downloadUrl) {
-      return dataRecord.downloadUrl;
-    }
-
-    if (Array.isArray(record?.content) && record.content.length > 0) {
-      const text = this.asRecord(record.content[0])?.text;
-      if (typeof text === 'string') {
-        try {
-          const parsed: unknown = JSON.parse(text);
-          const parsedRecord = this.asRecord(parsed);
-          if (typeof parsedRecord?.downloadUrl === 'string' && parsedRecord.downloadUrl) {
-            return parsedRecord.downloadUrl;
-          }
-        } catch {}
-      }
-    }
-
-    throw new Error('Room Files file detail did not include a download URL');
   }
 
   private asRecord(value: unknown): Record<string, unknown> | undefined {
