@@ -4,7 +4,8 @@ import { EmployeeProfile, PassedCandidate } from './types';
 import { PrivOSLifecycleService } from './services/PrivOSLifecycleService';
 import { LifecycleServiceProvider, useLifecycleService } from './di/LifecycleContext';
 import { EmployeeEmailTemplateProvider } from './di/EmployeeEmailTemplateContext';
-import { BuiltinEmployeeEmailTemplateProvider, type IEmployeeEmailTemplateProvider } from './email/EmployeeEmailTemplateProvider';
+import { createEmployeeEmailTemplateRepository } from '../email-templates/interview-email-template-default';
+import type { ActiveTemplateRepository } from '../cv-scored/invite-template-state';
 import { KanbanBoard } from './components/KanbanBoard';
 import { ProfileListView } from './components/ProfileListView';
 import { CreateDetailedProfileForm } from './components/CreateDetailedProfileForm';
@@ -356,12 +357,12 @@ function LifecycleContent({ active }: { active: boolean }) {
 }
 
 export interface LifecycleDashboardProps {
-  emailTemplateProvider?: IEmployeeEmailTemplateProvider;
+  emailTemplateRepository?: ActiveTemplateRepository;
   /** True only while this tab is the visible one — polling is gated on it. */
   active?: boolean;
 }
 
-export default function LifecycleDashboard({ emailTemplateProvider, active = false }: LifecycleDashboardProps = {}) {
+export default function LifecycleDashboard({ emailTemplateRepository, active = false }: LifecycleDashboardProps = {}) {
   console.log('[LifecycleDashboard] Default export mounted');
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
@@ -372,13 +373,13 @@ export default function LifecycleDashboard({ emailTemplateProvider, active = fal
     console.log('[LifecycleDashboard] Creating PrivOSLifecycleService');
     return new PrivOSLifecycleService(app);
   }, [app]);
-  const resolvedEmailTemplateProvider = useMemo(
-    () => emailTemplateProvider ?? new BuiltinEmployeeEmailTemplateProvider(),
-    [emailTemplateProvider]
+  const resolvedEmailTemplateRepository = useMemo(
+    () => emailTemplateRepository ?? (app && roomId ? createEmployeeEmailTemplateRepository(app, roomId) : null),
+    [app, emailTemplateRepository, roomId]
   );
   console.log('[LifecycleDashboard] Default export - service:', !!service);
 
-  if (!app || !roomId || !service) {
+  if (!app || !roomId || !service || !resolvedEmailTemplateRepository) {
     console.log('[LifecycleDashboard] Default export - Missing dependencies, showing connecting state');
     return (
       <div className="lifecycle-connecting">
@@ -391,7 +392,7 @@ export default function LifecycleDashboard({ emailTemplateProvider, active = fal
 
   return (
     <LifecycleServiceProvider service={service}>
-      <EmployeeEmailTemplateProvider provider={resolvedEmailTemplateProvider}>
+      <EmployeeEmailTemplateProvider repository={resolvedEmailTemplateRepository}>
         <LifecycleContent active={active} />
       </EmployeeEmailTemplateProvider>
     </LifecycleServiceProvider>

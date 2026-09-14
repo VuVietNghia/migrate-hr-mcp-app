@@ -1,19 +1,20 @@
 import { createContext, useContext, type ReactNode } from 'react';
-import type { IEmployeeEmailTemplateProvider } from '../email/EmployeeEmailTemplateProvider';
+import type { ActiveTemplateRepository } from '../../cv-scored/invite-template-state';
 
-const EmployeeEmailTemplateContext = createContext<IEmployeeEmailTemplateProvider | null>(null);
+const EmployeeEmailTemplateContext = createContext<ActiveTemplateRepository | null>(null);
 
 interface EmployeeEmailTemplateProviderProps {
-  provider: IEmployeeEmailTemplateProvider;
+  repository: ActiveTemplateRepository;
   children: ReactNode;
 }
 
-export function EmployeeEmailTemplateProvider({ provider, children }: EmployeeEmailTemplateProviderProps) {
-  return <EmployeeEmailTemplateContext.Provider value={provider}>{children}</EmployeeEmailTemplateContext.Provider>;
+export function EmployeeEmailTemplateProvider({ repository, children }: EmployeeEmailTemplateProviderProps) {
+  return <EmployeeEmailTemplateContext.Provider value={repository}>{children}</EmployeeEmailTemplateContext.Provider>;
 }
 
-export function useEmployeeEmailTemplateProvider(): IEmployeeEmailTemplateProvider {
-  const provider = useContext(EmployeeEmailTemplateContext);
-  if (!provider) throw new Error('useEmployeeEmailTemplateProvider must be used within an EmployeeEmailTemplateProvider');
-  return provider;
+/** The Room's employee template store; the composer sends with whichever template is active in Email → Mẫu email. */
+export function useEmployeeEmailTemplateRepository(): ActiveTemplateRepository {
+  const repository = useContext(EmployeeEmailTemplateContext);
+  if (!repository) throw new Error('useEmployeeEmailTemplateRepository must be used within an EmployeeEmailTemplateProvider');
+  return repository;
 }

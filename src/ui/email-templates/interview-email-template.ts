@@ -145,7 +145,18 @@ export function createUniqueTemplateId(name: string, existingIds: Set<string>): 
   return `${baseId}-${suffix}`;
 }
 
-const TOKEN_RENDERERS: Record<string, (variables: InterviewEmailTemplateVariables) => string> = {
+export type EmailTemplateTokenRenderers<TVariables> = Record<string, (variables: TVariables) => string>;
+
+/** Replaces known `{{token}}`s; unknown tokens are left as typed so the user can spot them. */
+export function renderEmailTemplateText<TVariables>(
+  text: string,
+  variables: TVariables,
+  renderers: EmailTemplateTokenRenderers<TVariables>,
+): string {
+  return text.replace(/{{[^{}]+}}/g, (token) => renderers[token]?.(variables) ?? token);
+}
+
+const TOKEN_RENDERERS: EmailTemplateTokenRenderers<InterviewEmailTemplateVariables> = {
   '{{ten_ung_vien}}': ({ candidateName }) => candidateName.trim() ? candidateName : '[Tên ứng viên]',
   '{{email_ung_vien}}': ({ candidateEmail }) => candidateEmail.trim() ? candidateEmail : '[Email ứng viên]',
   '{{vi_tri}}': ({ position }) => position.trim() ? position : '[Tên vị trí]',
@@ -159,17 +170,13 @@ const TOKEN_RENDERERS: Record<string, (variables: InterviewEmailTemplateVariable
   },
 };
 
-function renderText(text: string, variables: InterviewEmailTemplateVariables): string {
-  return text.replace(/{{[^{}]+}}/g, (token) => TOKEN_RENDERERS[token]?.(variables) ?? token);
-}
-
 export function renderInterviewEmailTemplate(
   template: InterviewEmailTemplateDocument,
   variables: InterviewEmailTemplateVariables,
 ): RenderedInterviewEmailTemplate {
   return {
-    subject: renderText(template.subject, variables),
-    body: renderText(template.body, variables),
+    subject: renderEmailTemplateText(template.subject, variables, TOKEN_RENDERERS),
+    body: renderEmailTemplateText(template.body, variables, TOKEN_RENDERERS),
   };
 }
 
@@ -177,7 +184,7 @@ export function serializeActiveTemplateId(id: string): string {
   if (!TEMPLATE_ID_PATTERN.test(id)) {
     throw new Error('Active template id is invalid');
   }
-  return `# Active interview email template\n\nactive_template_id: ${id}\n`;
+  return `# Active email template\n\nactive_template_id: ${id}\n`;
 }
 
 export function parseActiveTemplateId(markdown: string): string | null {

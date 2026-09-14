@@ -29,6 +29,7 @@ export async function loadActiveInviteTemplate(
   repository: ActiveTemplateRepository,
   isCurrent: () => boolean,
   updateState: (state: InviteTemplateLoadState) => void,
+  label = 'phỏng vấn',
 ): Promise<void> {
   updateState({ activeTemplate: null, loadedRepository: null, loading: true, error: null });
   try {
@@ -43,7 +44,7 @@ export async function loadActiveInviteTemplate(
         activeTemplate: null,
         loadedRepository: null,
         loading: false,
-        error: `Không thể tải mẫu email phỏng vấn: ${error instanceof Error ? error.message : String(error)}`,
+        error: `Không thể tải mẫu email ${label}: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
   }

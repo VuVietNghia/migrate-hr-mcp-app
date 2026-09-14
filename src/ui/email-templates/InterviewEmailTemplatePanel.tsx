@@ -15,7 +15,6 @@ import {
   getTemplateUseButtonPresentation,
   getInterviewEmailTemplateRowKey,
   getTemplateDraftValidationError,
-  getTemplatePanelMode,
   insertTemplateTokenAtSelection,
   isTemplateDraftDirty,
   openTemplatePanelCreate,
@@ -24,13 +23,14 @@ import {
   settleTemplatePanelMutation,
   settleTemplatePanelLoad,
   updateTemplatePanelDraft,
+  type EmailTemplateCategory,
   type TemplatePanelState,
 } from './interview-email-template-state';
 import './interview-email-template.css';
 
 export interface InterviewEmailTemplatePanelProps {
   repository: IInterviewEmailTemplateRepository;
-  category: 'cv_scored' | 'lifecycle';
+  category: EmailTemplateCategory;
   active: boolean;
   createRequest: number;
   query: string;
@@ -40,13 +40,31 @@ export interface InterviewEmailTemplatePanelProps {
 
 type EditableField = 'subject' | 'body';
 
-const VARIABLES = [
-  { token: '{{ten_ung_vien}}', label: 'Tên ứng viên' },
-  { token: '{{email_ung_vien}}', label: 'Email ứng viên' },
-  { token: '{{vi_tri}}', label: 'Vị trí' },
-  { token: '{{cong_ty}}', label: 'Công ty' },
-  { token: '{{thoi_gian_phong_van}}', label: 'Thời gian phỏng vấn' },
-] as const;
+const CATEGORY_PRESENTATION: Record<EmailTemplateCategory, {
+  label: string;
+  variables: ReadonlyArray<{ token: string; label: string }>;
+}> = {
+  cv_scored: {
+    label: 'phỏng vấn',
+    variables: [
+      { token: '{{ten_ung_vien}}', label: 'Tên ứng viên' },
+      { token: '{{email_ung_vien}}', label: 'Email ứng viên' },
+      { token: '{{vi_tri}}', label: 'Vị trí' },
+      { token: '{{cong_ty}}', label: 'Công ty' },
+      { token: '{{thoi_gian_phong_van}}', label: 'Thời gian phỏng vấn' },
+    ],
+  },
+  lifecycle: {
+    label: 'nhân sự',
+    variables: [
+      { token: '{{ten_nhan_vien}}', label: 'Tên nhân viên' },
+      { token: '{{email_nhan_vien}}', label: 'Email nhân viên' },
+      { token: '{{vi_tri}}', label: 'Vị trí' },
+      { token: '{{phong_ban}}', label: 'Phòng ban' },
+      { token: '{{ngay_bat_dau}}', label: 'Ngày bắt đầu' },
+    ],
+  },
+};
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -92,7 +110,7 @@ export function InterviewEmailTemplatePanel({
   }, [onReadyChange, repository, updatePanel]);
 
   const refreshTemplates = useCallback((): Promise<void> => {
-    if (!active || category !== 'cv_scored') return Promise.resolve();
+    if (!active) return Promise.resolve();
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
     if (panelRef.current.working) return Promise.resolve();
 
@@ -132,10 +150,10 @@ export function InterviewEmailTemplatePanel({
       });
     refreshInFlightRef.current = request;
     return request;
-  }, [active, category, onCountChange, onReadyChange, repository, updatePanel]);
+  }, [active, onCountChange, onReadyChange, repository, updatePanel]);
 
   usePolling(refreshTemplates, {
-    enabled: active && category === 'cv_scored',
+    enabled: active,
     interval: 3000,
     immediate: true,
   });
@@ -147,16 +165,13 @@ export function InterviewEmailTemplatePanel({
 
   useEffect(() => {
     if (handledCreateRequest.current === createRequest) return;
-    if (!active || category !== 'cv_scored' || panel.working || panel.loadStatus !== 'ready') return;
+    if (!active || panel.working || panel.loadStatus !== 'ready') return;
     handledCreateRequest.current = createRequest;
     updatePanel(openTemplatePanelCreate);
     setFocusedField(null);
-  }, [active, category, createRequest, panel.loadStatus, panel.working, updatePanel]);
+  }, [active, createRequest, panel.loadStatus, panel.working, updatePanel]);
 
-  if (getTemplatePanelMode(category) === 'lifecycle-empty') {
-    return <div className="interview-template-panel interview-template-empty">Chưa có mẫu email nhân sự</div>;
-  }
-
+  const { label: categoryLabel, variables } = CATEGORY_PRESENTATION[category];
   const detailIdentity = panel.view.kind === 'detail' ? panel.view : null;
   const snapshot = panel.snapshot;
   const activeTemplateId = snapshot?.activeTemplateId ?? null;
@@ -267,8 +282,8 @@ export function InterviewEmailTemplatePanel({
 
   if (panel.view.kind === 'list') {
     return (
-      <div className="interview-template-panel" aria-label="Danh sách mẫu email phỏng vấn">
-        <div className="interview-template-panel-header"><h2>Mẫu email phỏng vấn</h2></div>
+      <div className="interview-template-panel" aria-label={`Danh sách mẫu email ${categoryLabel}`}>
+        <div className="interview-template-panel-header"><h2>Mẫu email {categoryLabel}</h2></div>
         {loading && !snapshot && <div className="interview-template-empty">Đang tải mẫu email…</div>}
         {panel.loadStatus === 'error' ? (
           <InterviewEmailTemplateLoadError
@@ -287,14 +302,14 @@ export function InterviewEmailTemplatePanel({
             {activeTemplateId === template.id && <span className="interview-template-badge">Đang sử dụng</span>}
           </button>
         ))}
-        {!loading && snapshot?.templates.length === 0 && <div className="interview-template-empty">Chưa có mẫu email phỏng vấn</div>}
+        {!loading && snapshot?.templates.length === 0 && <div className="interview-template-empty">Chưa có mẫu email {categoryLabel}</div>}
         {!loading && Boolean(snapshot?.templates.length) && visibleTemplates.length === 0 && <div className="interview-template-empty">Không tìm thấy mẫu email phù hợp</div>}
       </div>
     );
   }
 
   return (
-    <section className="interview-template-panel interview-template-detail" aria-label="Chỉnh sửa mẫu email phỏng vấn">
+    <section className="interview-template-panel interview-template-detail" aria-label={`Chỉnh sửa mẫu email ${categoryLabel}`}>
       <div className="interview-template-detail-header">
         <button type="button" className="email-action-btn" disabled={panel.working !== null} onClick={() => updatePanel(current => current.working ? current : { ...current, view: { kind: 'list' } })}>Quay lại</button>
         <h2>{panel.view.kind === 'create' ? 'Tạo mẫu email' : 'Chi tiết mẫu email'}</h2>
@@ -306,7 +321,7 @@ export function InterviewEmailTemplatePanel({
 
       <div className="interview-template-variables" aria-label="Biến email">
         <span>Chèn biến vào {focusedField === 'subject' ? 'tiêu đề' : focusedField === 'body' ? 'nội dung' : 'trường đang chọn'}:</span>
-        {VARIABLES.map(variable => <button type="button" key={variable.token} className="email-action-btn" disabled={!focusedField || panel.working !== null} onClick={() => insertVariable(variable.token)}>{variable.label}</button>)}
+        {variables.map(variable => <button type="button" key={variable.token} className="email-action-btn" disabled={!focusedField || panel.working !== null} onClick={() => insertVariable(variable.token)}>{variable.label}</button>)}
       </div>
 
       {panel.loadStatus === 'error' ? (
