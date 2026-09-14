@@ -21,7 +21,7 @@ export const PAYROLL_TOOL_NAMES = [
 	'hrm.payroll.delete',
 ] as const;
 export type PayrollToolName = (typeof PAYROLL_TOOL_NAMES)[number];
-
+	
 const PAYROLL_DATA_SCHEMA = {
 	type: 'object',
 	properties: {
@@ -166,10 +166,14 @@ function requireId(args: Record<string, unknown>): string {
 
 export async function handlePayrollTool(name: PayrollToolName, rawArgs: unknown, actor: VerifiedActor | undefined) {
 	const args = asRecord(rawArgs);
-	const roomId = resolveActorRoom(args, actor);
-	const { repository } = dependencies;
 
+	// TẠM THỜI (chẩn đoán): SDK chỉ log `errorCode: -32603` và trả về "Internal error" cho client,
+	// nên nguyên nhân thật của một lần ném lỗi ở đây không nhìn thấy được từ đâu cả. Ghi lại lý do
+	// vào log server để xác định guard nào chặn. Không log userId/username — chỉ đủ để chẩn đoán.
 	try {
+		const roomId = resolveActorRoom(args, actor);
+		const { repository } = dependencies;
+
 		switch (name) {
 			case 'hrm.payroll.query': {
 				await repository.initializeSchema(roomId);
@@ -192,16 +196,13 @@ export async function handlePayrollTool(name: PayrollToolName, rawArgs: unknown,
 			}
 		}
 	} catch (error) {
-		// TEMP DIAGNOSTIC (2026-09-10) — @privos_ai/app-server's runtime sanitizes every thrown
-		// error down to a bare "Internal error" before it reaches the client, and even its own
-		// server-side log only records `errorCode`, never `message`/`stack` (runtime.js). This is
-		// the only place the real cause is still visible. Remove once hrm.payroll.query's 400 is
-		// root-caused (see docs/superpowers/plans/2026-09-10-payroll-db-conformance-fixes.md).
-		console.error('[hrm.payroll] tool threw', {
-			name,
-			roomId,
-			message: error instanceof Error ? error.message : String(error),
-			stack: error instanceof Error ? error.stack : undefined,
+		console.error('[hrm.payroll] THẤT BẠI', {
+			tool: name,
+			reason: error instanceof Error ? error.message : String(error),
+			hasActor: Boolean(actor),
+			actorProvenance: actor?.provenance,
+			actorRoomId: actor?.roomId,
+			requestedRoomId: typeof args.roomId === 'string' ? args.roomId : undefined,
 		});
 		throw error;
 	}

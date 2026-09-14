@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { PipelineService, CVFile } from './pipeline-service';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
-import { createOrUpdateFile, getFileContent } from './privos-rest';
+import { createOrUpdateFile, describeFeatureError, readRoomFileText } from './privos-rest';
 import { buildCompactJDChatHistory } from './jd-chat-history';
 import { JDChatbotHeader } from './jd-chatbot-header';
 import { JDChatbotCompanyOption, JDChatbotComposer, JDChatbotEditButton } from './jd-chatbot-interaction-controls';
@@ -57,24 +57,6 @@ function renderJDMarkdown(content: string, changedLines: Set<number>) {
   });
 }
 
-async function loadJDContent(app: any, roomId: string, jd: CVFile): Promise<string> {
-  const canonicalContent = await getFileContent(app, `${roomId}/hr-miniapp/jds/${jd.name}`);
-  if (canonicalContent.trim()) return canonicalContent;
-
-  if (jd.downloadUrl) {
-    try {
-      const response = await fetch(jd.downloadUrl);
-      if (response.ok) {
-        const content = await response.text();
-        if (content.trim()) return content;
-      }
-    } catch (error) {
-      console.warn('[JD Chatbot] Không tải được từ downloadUrl:', error);
-    }
-  }
-
-  return '';
-}
 
 export default function JDChatbotFunctional() {
   const app = usePrivosApp(); const { roomId } = usePrivosContext(); const service = useRef<PipelineService>();
@@ -87,7 +69,7 @@ export default function JDChatbotFunctional() {
   useEffect(() => { service.current = new PipelineService(app, roomId, new MarkdownPathContextBuilder()); refresh().catch(console.error); }, [app, roomId]);
   useEffect(() => { if (chatMessagesRef.current) chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight; }, [messages, busy]);
   useEffect(() => { if (draft === saved) setChangedJDLines(new Set()); }, [draft, saved]);
-  const choose = async (jd: CVFile) => { const requestId = ++jdLoadRequestRef.current; setSelected(jd); setOpen(false); setMessages([hello]); setEditing(false); setExitConfirmOpen(false); setDraft(''); setSaved(''); setJDLoadError(null); setJDLoading(true); try { const content = await loadJDContent(app, roomId, jd); if (requestId !== jdLoadRequestRef.current) return; if (!content.trim()) { setJDLoadError('Không thể tải nội dung JD. Vui lòng chọn lại JD hoặc thử lại sau.'); return; } setDraft(content); setSaved(content); } catch (error) { if (requestId !== jdLoadRequestRef.current) return; setJDLoadError(`Không thể tải nội dung JD: ${error instanceof Error ? error.message : String(error)}`); } finally { if (requestId === jdLoadRequestRef.current) setJDLoading(false); } };
+  const choose = async (jd: CVFile) => { const requestId = ++jdLoadRequestRef.current; setSelected(jd); setOpen(false); setMessages([hello]); setEditing(false); setExitConfirmOpen(false); setDraft(''); setSaved(''); setJDLoadError(null); setJDLoading(true); try { const content = await readRoomFileText(app, jd); if (requestId !== jdLoadRequestRef.current) return; if (!content.trim()) { setJDLoadError('File JD đang trống.'); return; } setDraft(content); setSaved(content); } catch (error) { if (requestId !== jdLoadRequestRef.current) return; setJDLoadError(`Không thể tải nội dung JD: ${describeFeatureError(error, 'không đọc được file JD.')}`); } finally { if (requestId === jdLoadRequestRef.current) setJDLoading(false); } };
   const save = async (content: string, name = selected?.name) => { if (!content.trim() || !name || isSaving) return; setIsSaving(true); setSaveMessage(null); try { await createOrUpdateFile(app, `${roomId}/hr-miniapp/jds/${name}`, content); const files = await refresh(); setSelected(files.find(jd => jd.name === name) || selected); setSaved(content); setEditing(false); setSaveMessage({ type: 'success', text: '✓ Đã lưu thay đổi.' }); window.setTimeout(() => setSaveMessage(null), 2000); } catch (error) { setSaveMessage({ type: 'error', text: `Không thể lưu JD: ${error instanceof Error ? error.message : String(error)}` }); } finally { setIsSaving(false); } };
   const send = async () => { if (!input.trim() || !service.current || busy) return; const next = [...messages, { role: 'user' as const, content: input }]; setMessages(next); setInput(''); setBusy(true); const history = buildCompactJDChatHistory(next); const existing = selected ? `\nJD đang chỉnh sửa, giữ tên <saved_file>${selected.name}</saved_file>:\n${draft}` : ''; const companyInstruction = includeCompany ? '\nKhi tạo JD trong lượt này, bắt buộc đọc Room Files/hr-miniapp/company, thêm mục “Thông tin công ty” ngắn gọn và điều chỉnh yêu cầu tuyển dụng phù hợp với công ty.' : '\nKhông thêm thông tin công ty vào JD.'; const editInstruction = selected ? '\nQUY TẮC CHỈNH SỬA: Khi người dùng nói “thêm”, “bổ sung”, “cộng thêm” hoặc “mở rộng”, phải giữ nguyên toàn bộ thông tin cũ và chỉ thêm thông tin mới vào đúng mục; tuyệt đối không xóa giá trị cũ. Ví dụ, thêm địa điểm Hà Nội vào địa điểm hiện có phải giữ cả địa điểm cũ và Hà Nội. Chỉ được xóa hoặc thay thế khi người dùng nói rõ “xóa”, “bỏ”, “thay”, hoặc “đổi từ ... thành ...”. Mọi nội dung không được yêu cầu thay đổi phải giữ nguyên.' : ''; const prompt = `[SYSTEM AUTOMATION] Bạn là AI Chatbot tuyển dụng. Hỏi đến khi đủ Vị trí, Địa điểm, Mức lương, Yêu cầu/kinh nghiệm; thiếu thì không tạo JD. Khi đủ trả JD trong <jd_content>...</jd_content>, không dùng công cụ hay lưu file. Trước các thẻ nội bộ, trả lời 1-2 câu tự nhiên theo ngữ cảnh, nêu ngắn gọn điều bạn đã tạo hoặc chỉnh sửa. Trình bày JD chi tiết vừa phải: làm rõ mục tiêu, trách nhiệm chính, yêu cầu, kỹ năng, quyền lợi và cách ứng tuyển; tránh lan man, lặp ý hoặc bịa thông tin. Bắt buộc trả đúng tên vị trí, không thêm “Tin tuyển dụng” hoặc nội dung JD, trong <position_name>...</position_name>. Trả tên theo mẫu JD_AI_TenVietHoa.md trong <saved_file>...</saved_file>; giao diện chỉ lưu vào hr-miniapp/jds.${companyInstruction}${editInstruction}${existing}\nLịch sử:\n${history}\nAI:`; try { const result = await service.current.askAI(prompt, undefined, undefined, undefined, `jd-chat-${Date.now()}`); const text = result?.text || 'Không nhận được phản hồi từ AI.'; setMessages(previous => [...previous, { role: 'ai', content: text }]); const content = text.match(/<jd_content>\s*([\s\S]*?)\s*<\/jd_content>/i)?.[1]?.trim(); const positionName = extractJDPositionName(text, content || ''); if (!selected && content) { const generatedName = formatGeneratedJDName(positionName); setDraft(content); setChangedJDLines(new Set()); setEditing(false); if (generatedName) await save(content, generatedName); else setSaveMessage({ type: 'error', text: 'Chưa nhận được tên vị trí hợp lệ nên JD chưa được lưu.' }); } else if (content) { setDraft(content); setChangedJDLines(getChangedJDLineIndexes(saved, content)); setEditing(false); } } catch (error) { setMessages(previous => [...previous, { role: 'ai', content: `Lỗi gửi AI: ${String(error)}` }]); } finally { setBusy(false); } };
   const fresh = () => { jdLoadRequestRef.current++; setSelected(null); setDraft(''); setSaved(''); setJDLoading(false); setJDLoadError(null); setMessages([hello]); setEditing(false); setExitConfirmOpen(false); setOpen(false); };

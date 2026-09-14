@@ -1,6 +1,6 @@
 import { FormEvent, useState, useEffect } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
-import { createOrUpdateFile } from './privos-rest';
+import { createOrUpdateFile, readRoomFileText } from './privos-rest';
 import { PipelineService } from './pipeline-service';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
 
@@ -115,18 +115,9 @@ export default function RecruitmentPanel() {
           
           let content = '';
           try {
-            if (jd.downloadUrl) {
-              const res = await fetch(jd.downloadUrl);
-              content = await res.text();
-            } else {
-              const res: any = await app.callServerTool({
-                name: 'mcpapp.files.getContent',
-                arguments: { path: `${roomId}/hr-miniapp/jds/${jd.name}` }
-              });
-              content = typeof res === 'string' ? res : (res?.data || '');
-            }
+            content = await readRoomFileText(app, { _id: jd._id, downloadUrl: jd.downloadUrl });
           } catch (e: any) {
-            content = await service.getMarkdownContent(jd.name);
+            console.warn(`[Recruitment] Không đọc được JD ${jd.name}:`, e);
           }
           if (!content) {
             continue;
