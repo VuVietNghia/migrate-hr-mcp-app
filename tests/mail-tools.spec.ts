@@ -26,7 +26,7 @@ describe('hrm.mail.* tools', () => {
   let retry: ReturnType<typeof vi.fn>;
   let seenRoom: string | undefined;
   beforeEach(() => {
-    send = vi.fn(async () => ({ id: 'I1', status: 'sent' }));
+    send = vi.fn(async () => ({ status: 'sent', record: { id: 'I1', status: 'sent' } }));
     retry = vi.fn(async () => ({ id: 'I1', status: 'sent' }));
     seenRoom = undefined;
     setMailToolDependencies({
@@ -73,6 +73,23 @@ describe('hrm.mail.* tools', () => {
       requestedBy: 'u1',
     });
     expect(JSON.parse(result.content[0].text)).toEqual({ itemId: 'I1', status: 'sent' });
+  });
+
+  it('reports a delivered-but-unlogged email as sent_unlogged instead of failing', async () => {
+    send.mockResolvedValueOnce({ status: 'sent_unlogged', historyError: 'agent_bot_credential_absent' });
+
+    const result = await handleMailTool('hrm.mail.send', base, actor);
+
+    // A thrown error here would make the operator resend and the recipient get a duplicate.
+    expect(JSON.parse(result.content[0].text)).toEqual({ itemId: null, status: 'sent_unlogged' });
+  });
+
+  it('never forwards the internal history error to the caller', async () => {
+    send.mockResolvedValueOnce({ status: 'sent_unlogged', historyError: 'mcpapp.lists.createItem failed: secret detail' });
+
+    const result = await handleMailTool('hrm.mail.send', base, actor);
+
+    expect(result.content[0].text).not.toContain('secret detail');
   });
 
   it('retry requires itemId and uses the actor room', async () => {

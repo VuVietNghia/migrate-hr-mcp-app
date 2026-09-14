@@ -12,6 +12,7 @@ import { EmailHistoryRepository } from './services/mail/email-history-repository
 import { sanitizeEmailHtml } from './services/mail/html-sanitizer';
 import { MailRelayService } from './services/mail/mail-relay-service';
 import { TrackedMailService } from './services/mail/tracked-mail-service';
+import { isValidEmailAddress } from './ui/utils/email-validation';
 
 export const MAIL_TOOL_NAMES = ['hrm.mail.send', 'hrm.mail.retry'] as const;
 export type MailToolName = (typeof MAIL_TOOL_NAMES)[number];
@@ -54,7 +55,6 @@ export function isMailTool(name: unknown): name is MailToolName {
 	return typeof name === 'string' && (MAIL_TOOL_NAMES as readonly string[]).includes(name);
 }
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_SUBJECT = 500;
 const MAX_HTML = 200_000;
 
@@ -104,12 +104,12 @@ export async function handleMailTool(name: MailToolName, rawArgs: unknown, actor
 	const source = args.source;
 	if (source !== 'cv_scored' && source !== 'lifecycle') throw new Error("source must be 'cv_scored' or 'lifecycle'");
 	const toEmail = requireString(args, 'toEmail', 320);
-	if (!EMAIL_REGEX.test(toEmail)) throw new Error('Recipient email is invalid');
+	if (!isValidEmailAddress(toEmail)) throw new Error('Recipient email is invalid');
 	const rawHtml = typeof args.htmlContent === 'string' ? args.htmlContent : '';
 	if (!rawHtml.trim()) throw new Error('htmlContent is required');
 	if (rawHtml.length > MAX_HTML) throw new Error(`htmlContent exceeds ${MAX_HTML} characters`);
 
-	const record = await tracked.send({
+	const outcome = await tracked.send({
 		roomId,
 		source,
 		recipientName: requireString(args, 'toName', 256),
@@ -121,5 +121,9 @@ export async function handleMailTool(name: MailToolName, rawArgs: unknown, actor
 		jdName: optionalString(args, 'jdName'),
 		requestedBy: actor!.userId,
 	});
-	return { content: [{ type: 'text' as const, text: JSON.stringify({ itemId: record.id, status: record.status }) }] };
+	// `historyError` stays server-side: the UI only needs to know the mail went out unlogged.
+	const result = outcome.status === 'sent'
+		? { itemId: outcome.record.id, status: outcome.record.status }
+		: { itemId: null, status: 'sent_unlogged' as const };
+	return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
 }
