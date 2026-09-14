@@ -3,8 +3,11 @@ import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { PipelineService, CVFile, ProcessingStatus } from './pipeline-service';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
 import { getCvPipelineDisplayReason } from './cv-pipeline-display-reason';
-import { createOrUpdateFile, getFileContent } from './privos-rest';
+import { createOrUpdateFile, describeFeatureError, getFileTextById } from './privos-rest';
 import { usePolling } from './hooks/usePolling';
+
+const JD_DOWNLOAD_TIMEOUT_MS = 8000;
+type JdLoadStatus = 'idle' | 'loading' | 'success' | 'error';
 
 // Dependency Injection Interface
 // Swap implementation easily in the future (e.g. mock for testing)
@@ -448,6 +451,9 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
   const [jdName, setJdName] = useState('');
   const [jdModalOpen, setJdModalOpen] = useState(false);
   const [jdLoadingContent, setJdLoadingContent] = useState(false);
+  const [jdLoadStatus, setJdLoadStatus] = useState<JdLoadStatus>('idle');
+  const [jdLoadError, setJdLoadError] = useState('');
+  const jdLoadRequestRef = useRef(0);
   const [isEditingJd, setIsEditingJd] = useState(false);
   const [jdEditDraft, setJdEditDraft] = useState('');
   const [isSavingJd, setIsSavingJd] = useState(false);
@@ -466,120 +472,56 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
 
   const loadJdContent = async (name: string, fileId?: string) => {
     if (!name) return '';
+    // Only the latest request may touch state: picking another JD mid-load must not
+    // let the slower, older response overwrite the newer selection.
+    const requestId = ++jdLoadRequestRef.current;
+    const isCurrent = () => requestId === jdLoadRequestRef.current;
     setJdLoadingContent(true);
+    setJdLoadStatus('loading');
+    setJdLoadError('');
+    let lastError: unknown;
     try {
       const baseName = name.split('/').pop()?.split('\\').pop() || name;
       const targetFile = availableJDs.find(f => f.name === name || f.name === baseName || (fileId && f._id === fileId));
+      const resolvedFileId = fileId || targetFile?._id;
+      let text = '';
 
-      // Method 1: Download directly via presigned downloadUrl if available on CVFile
-      if (targetFile?.downloadUrl) {
+      // Method 1: the Hub's file-management content route, the read path granted to the app.
+      if (resolvedFileId) {
         try {
-          const resp = await fetch(targetFile.downloadUrl);
-          if (resp.ok) {
-            const text = await resp.text();
-            if (text && text.trim()) {
-              setJdContent(text);
-              return text;
-            }
-          }
+          text = await getFileTextById(app, resolvedFileId);
         } catch (e) {
+          lastError = e;
+          console.warn('[JD Load] file-management content route failed:', e);
+        }
+      }
+
+      // Method 2: presigned downloadUrl. Bounded, because the Hub can hand out a MinIO host the
+      // browser cannot reach and an unbounded fetch then hangs for ~20s before failing.
+      if (!text.trim() && targetFile?.downloadUrl) {
+        try {
+          const resp = await fetch(targetFile.downloadUrl, { signal: AbortSignal.timeout(JD_DOWNLOAD_TIMEOUT_MS) });
+          if (!resp.ok) throw new Error(`Download failed (${resp.status})`);
+          text = await resp.text();
+        } catch (e) {
+          lastError = lastError ?? e;
           console.warn('[JD Load] Fetch targetFile.downloadUrl failed:', e);
         }
       }
 
-      // Method 2: Call privos.files.get to retrieve file details & downloadUrl
-      const resolvedFileId = fileId || targetFile?._id;
-      if (resolvedFileId) {
-        try {
-          const getRes: any = await app.callServerTool({
-            name: 'mcpapp.files.get',
-            arguments: { fileId: resolvedFileId }
-          });
-          let url: string | undefined = getRes?.downloadUrl;
-          if (!url && getRes?.content?.[0]?.text) {
-            try {
-              const parsed = JSON.parse(getRes.content[0].text);
-              url = parsed?.downloadUrl;
-            } catch (e) {}
-          }
-          if (url) {
-            const resp = await fetch(url);
-            if (resp.ok) {
-              const text = await resp.text();
-              if (text && text.trim()) {
-                setJdContent(text);
-                return text;
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('[JD Load] privos.files.get failed:', e);
-        }
+      if (!isCurrent()) return text;
+      if (text.trim()) {
+        setJdContent(text);
+        setJdLoadStatus('success');
+        return text;
       }
-
-      // Method 3: Call privos.files.search to search file by name in channel
-      try {
-        const searchRes: any = await app.callServerTool({
-          name: 'mcpapp.files.search',
-          arguments: { channelId: roomId, query: baseName }
-        });
-        let searchList: any[] = [];
-        if (searchRes?.content?.[0]?.text) {
-          try {
-            const parsed = JSON.parse(searchRes.content[0].text);
-            searchList = Array.isArray(parsed) ? parsed : (parsed?.files || []);
-          } catch (e) {}
-        } else {
-          searchList = Array.isArray(searchRes) ? searchRes : (searchRes?.files || []);
-        }
-        const matched = searchList.find((f: any) => f.name === baseName || f.name === name);
-        if (matched?.downloadUrl) {
-          const resp = await fetch(matched.downloadUrl);
-          if (resp.ok) {
-            const text = await resp.text();
-            if (text && text.trim()) {
-              setJdContent(text);
-              return text;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[JD Load] privos.files.search failed:', e);
-      }
-
-      // Method 4: Fallback to getMarkdownContent in PipelineService
-      if (serviceRef.current) {
-        const fetched = await serviceRef.current.getMarkdownContent(baseName);
-        if (fetched && fetched.trim()) {
-          setJdContent(fetched);
-          return fetched;
-        }
-      }
-
-      // Method 5: Fallback to getFileContent via REST API
-      const pathsToTry = [
-        `${roomId}/hr-miniapp/jds/${baseName}`,
-        `hr-miniapp/jds/${baseName}`,
-        `${roomId}/hr-miniapp/jds/${name}`,
-        `hr-miniapp/jds/${name}`,
-      ];
-      for (const p of pathsToTry) {
-        try {
-          const res = await getFileContent(app, p);
-          if (res && res.trim()) {
-            setJdContent(res);
-            return res;
-          }
-        } catch (e) {
-          // ignore
-        }
-      }
-    } catch (err) {
-      console.error('Lỗi khi nạp nội dung JD:', err);
+      setJdLoadStatus('error');
+      setJdLoadError(lastError ? describeFeatureError(lastError, 'Không đọc được file JD.') : 'File JD trống.');
+      addLog(`[LỖI] Không tải được nội dung JD ${name}: ${lastError instanceof Error ? lastError.message : 'file trống'}`);
+      return '';
     } finally {
-      setJdLoadingContent(false);
+      if (isCurrent()) setJdLoadingContent(false);
     }
-    return '';
   };
 
   const handleOpenJdModal = async () => {
@@ -601,6 +543,7 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
       const fullPath = `${roomId}/hr-miniapp/jds/${jdName}`;
       await createOrUpdateFile(app, fullPath, jdEditDraft);
       setJdContent(jdEditDraft);
+      setJdLoadStatus('success');
       setIsEditingJd(false);
       showToast(`Đã lưu thay đổi vào file RoomFiles/hr-miniapp/jds/${jdName}`, 'success');
       addLog(`[JD Editor] Đã cập nhật file JD: hr-miniapp/jds/${jdName}`);
@@ -736,8 +679,10 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
     }
 
     if (jdName && !currentJDs.some(jd => jd.name === jdName)) {
+      jdLoadRequestRef.current++;
       setJdName('');
       setJdContent('');
+      setJdLoadStatus('idle');
       setJdEditDraft('');
       setJdModalOpen(false);
       addLog(`[CẢNH BÁO] JD "${jdName}" không còn trong Room Files. Vui lòng chọn lại JD trước khi chấm.`);
@@ -817,14 +762,18 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
 
   const handleSelectJD = async (fileId: string, jdList: CVFile[] = availableJDs) => {
     if (!fileId) {
+      jdLoadRequestRef.current++;
       setJdContent('');
       setJdName('');
+      setJdLoadStatus('idle');
       setJdModalOpen(false);
       return;
     }
     const jdFile = jdList.find(f => f._id === fileId);
     if (!jdFile) return;
     setJdName(jdFile.name);
+    // Drop the previous JD's text so it is never shown as loaded, or scored, under the new name.
+    setJdContent('');
     await loadJdContent(jdFile.name, jdFile._id);
   };
 
@@ -1322,7 +1271,13 @@ REQUIRED:
             <div className="pl-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <p className="pl-label" style={{ margin: 0 }}>{"01 \u00b7 Job Description"}</p>
-                {jdContent && <span style={{ fontSize: '12px', color: 'var(--status-pass)', fontWeight: 500 }}>{'\u2713 \u0110\u00e3 n\u1ea1p'}</span>}
+                {jdName && jdLoadStatus === 'loading' ? (
+                  <span role="status" style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>{'\u23f3 \u0110ang t\u1ea3i...'}</span>
+                ) : jdName && jdLoadStatus === 'error' ? (
+                  <span role="alert" title={jdLoadError} style={{ fontSize: '12px', color: 'var(--status-fail)', fontWeight: 500 }}>{'\u2715 T\u1ea3i th\u1ea5t b\u1ea1i'}</span>
+                ) : jdContent ? (
+                  <span role="status" style={{ fontSize: '12px', color: 'var(--status-pass)', fontWeight: 500 }}>{'\u2713 \u0110\u00e3 n\u1ea1p'}</span>
+                ) : null}
               </div>
 
               {/* JD Selection */}
@@ -1377,6 +1332,19 @@ REQUIRED:
                     )}
                   </div>
                 </div>
+                {jdName && jdLoadStatus === 'error' && (
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--status-fail)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span>{`Không tải được nội dung JD. ${jdLoadError}`}</span>
+                    <button
+                      type="button"
+                      className="pl-jd-link-btn"
+                      onClick={() => { if (selectedJD) void loadJdContent(selectedJD.name, selectedJD._id); }}
+                      disabled={!selectedJD}
+                    >
+                      {'Thử lại'}
+                    </button>
+                  </p>
+                )}
               </div>
 
               {/* JD AI Generator */}

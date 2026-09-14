@@ -21,7 +21,7 @@ export const PAYROLL_TOOL_NAMES = [
 	'hrm.payroll.delete',
 ] as const;
 export type PayrollToolName = (typeof PAYROLL_TOOL_NAMES)[number];
-
+	
 const PAYROLL_DATA_SCHEMA = {
 	type: 'object',
 	properties: {
@@ -166,28 +166,44 @@ function requireId(args: Record<string, unknown>): string {
 
 export async function handlePayrollTool(name: PayrollToolName, rawArgs: unknown, actor: VerifiedActor | undefined) {
 	const args = asRecord(rawArgs);
-	const roomId = resolveActorRoom(args, actor);
-	const { repository } = dependencies;
 
-	switch (name) {
-		case 'hrm.payroll.query': {
-			await repository.initializeSchema(roomId);
-			return wrap({ records: await repository.queryByRoom(roomId) });
+	// TẠM THỜI (chẩn đoán): SDK chỉ log `errorCode: -32603` và trả về "Internal error" cho client,
+	// nên nguyên nhân thật của một lần ném lỗi ở đây không nhìn thấy được từ đâu cả. Ghi lại lý do
+	// vào log server để xác định guard nào chặn. Không log userId/username — chỉ đủ để chẩn đoán.
+	try {
+		const roomId = resolveActorRoom(args, actor);
+		const { repository } = dependencies;
+
+		switch (name) {
+			case 'hrm.payroll.query': {
+				await repository.initializeSchema(roomId);
+				return wrap({ records: await repository.queryByRoom(roomId) });
+			}
+			case 'hrm.payroll.create': {
+				const input = readPayrollInput(args.data, false);
+				return wrap(await repository.create(roomId, input));
+			}
+			case 'hrm.payroll.update': {
+				const id = requireId(args);
+				const input = readPayrollInput(args.data, true);
+				await repository.update(roomId, id, input);
+				return wrap({ id, updated: true });
+			}
+			case 'hrm.payroll.delete': {
+				const id = requireId(args);
+				await repository.delete(roomId, id);
+				return wrap({ id, deleted: true });
+			}
 		}
-		case 'hrm.payroll.create': {
-			const input = readPayrollInput(args.data, false);
-			return wrap(await repository.create(roomId, input));
-		}
-		case 'hrm.payroll.update': {
-			const id = requireId(args);
-			const input = readPayrollInput(args.data, true);
-			await repository.update(roomId, id, input);
-			return wrap({ id, updated: true });
-		}
-		case 'hrm.payroll.delete': {
-			const id = requireId(args);
-			await repository.delete(roomId, id);
-			return wrap({ id, deleted: true });
-		}
+	} catch (error) {
+		console.error('[hrm.payroll] THẤT BẠI', {
+			tool: name,
+			reason: error instanceof Error ? error.message : String(error),
+			hasActor: Boolean(actor),
+			actorProvenance: actor?.provenance,
+			actorRoomId: actor?.roomId,
+			requestedRoomId: typeof args.roomId === 'string' ? args.roomId : undefined,
+		});
+		throw error;
 	}
 }

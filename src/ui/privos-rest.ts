@@ -97,6 +97,21 @@ export async function restCall<T = any>(
  * UTF-8 markdown file into it. Tool names are the mediated `mcpapp.*` namespace of this scaffold.
  */
 
+/**
+ * Read a room file's text by id through the Hub's file-management content route. This is the read
+ * path the Hub grants MCP apps: `api/files/content` answers 403 "App is not permitted", and the
+ * presigned `downloadUrl` can point at a MinIO host the browser cannot reach. The Hub wraps the
+ * payload in a JSON string (`{ result }`), so only text files survive; binary files come back mangled.
+ * Throws when the file cannot be read, so callers can show a failure instead of an empty JD.
+ */
+export async function getFileTextById(app: McpApp, fileId: string, timeoutMs = 15000): Promise<string> {
+  const body = await restCall<any>(app, 'GET', `file-management.files/${fileId}/content`, { timeoutMs });
+  if (typeof body?.result !== 'string') {
+    throw new PrivosRestError('File content response did not include text');
+  }
+  return body.result;
+}
+
 export async function getFileContent(app: McpApp, path: string): Promise<string> {
   try {
     const res = await app.rest({
@@ -113,6 +128,41 @@ export async function getFileContent(app: McpApp, path: string): Promise<string>
     console.error('Failed to get file content', err);
     return '';
   }
+}
+
+/**
+ * The array a `mcpapp.*` list tool returned. Throws when the response cannot be read, so a failed
+ * read is never mistaken for an empty folder.
+ */
+export function readToolList(res: any, key: string): any[] {
+  if (res?.isError) {
+    throw new Error(res?.content?.[0]?.text || 'Tool call failed');
+  }
+  const text = res?.content?.[0]?.text;
+  const parsed = typeof text === 'string' ? JSON.parse(text) : res;
+  const list = Array.isArray(parsed) ? parsed : parsed?.[key];
+  if (!Array.isArray(list)) {
+    throw new Error(`Tool response did not include a ${key} list`);
+  }
+  return list;
+}
+
+/**
+ * Resolve an existing folder chain without creating anything. Returns `undefined` when a segment
+ * does not exist; throws when a listing cannot be read.
+ */
+export async function findFolderPath(app: McpApp, channelId: string, folderNames: string[]): Promise<string | undefined> {
+  let parentId: string | undefined;
+  for (const folderName of folderNames.filter(Boolean)) {
+    const res = await app.callServerTool({
+      name: 'mcpapp.folders.getByChannel',
+      arguments: { channelId, limit: 100, ...(parentId ? { parentId } : {}) },
+    });
+    const match = readToolList(res, 'folders').find((folder: any) => folder?.name === folderName);
+    if (!match?._id) return undefined;
+    parentId = match._id;
+  }
+  return parentId;
 }
 
 export async function ensureFolderPath(app: McpApp, channelId: string, folderNames: string[]): Promise<string | undefined> {
