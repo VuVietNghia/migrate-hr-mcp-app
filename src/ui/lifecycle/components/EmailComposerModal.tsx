@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { EmployeeProfile } from '../types';
-import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { parseToolResult, usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { useEmployeeEmailTemplateProvider } from '../di/EmployeeEmailTemplateContext';
 import { isValidEmailAddress } from '../../utils/email-validation';
 
@@ -9,6 +9,12 @@ interface EmailComposerModalProps {
   onClose: () => void;
   profile: EmployeeProfile;
 }
+
+const STATUS_COLORS = {
+  success: { color: '#065f46', backgroundColor: '#d1fae5', border: '1px solid #34d399' },
+  warning: { color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fbbf24' },
+  error: { color: '#991b1b', backgroundColor: '#fee2e2', border: '1px solid #f87171' },
+} as const;
 
 export function buildLifecycleMailArguments({
   roomId,
@@ -39,6 +45,7 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
   const [subject, setSubject] = useState<string>('');
   const [content, setContent] = useState<string>('');
   const [isSending, setIsSending] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
   if (!isOpen) return null;
 
@@ -74,16 +81,35 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
     }
 
     setIsSending(true);
+    setStatusMessage(null);
     try {
-      await app.callServerTool({
+      const response = await app.callServerTool({
         name: 'hrm.mail.send',
         arguments: buildLifecycleMailArguments({ roomId, profile, subject, content }),
       });
 
-      alert(`Đã gửi email thành công tới ${targetEmail}!`);
-      onClose();
+      const sentUnlogged = (parseToolResult(response) as { status?: string } | null)?.status === 'sent_unlogged';
+      const message = sentUnlogged
+        ? `Đã gửi email tới ${targetEmail}. Lưu ý: chưa lưu được vào lịch sử email, không cần gửi lại.`
+        : `Đã gửi email thành công tới ${targetEmail}!`;
+
+      // alert() bị chặn im lặng trong iframe sandbox (opaque origin) của mini-app này,
+      // nên banner trong modal mới là nguồn thông báo chính; alert() chỉ là best-effort.
+      setStatusMessage({ type: sentUnlogged ? 'warning' : 'success', text: message });
+      try {
+        alert(message);
+      } catch {
+        // ignore: xem comment ở trên.
+      }
+      setTimeout(onClose, sentUnlogged ? 2500 : 1200);
     } catch (err: any) {
-      alert('Lỗi gửi mail: ' + (err.message || err));
+      const message = 'Lỗi gửi mail: ' + (err.message || err);
+      setStatusMessage({ type: 'error', text: message });
+      try {
+        alert(message);
+      } catch {
+        // ignore: xem comment ở trên.
+      }
     } finally {
       setIsSending(false);
     }
@@ -96,7 +122,21 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
           <h3>✉️ Gửi Email cho {profile.name}</h3>
           <button className="bot-template-close-btn" onClick={onClose}>×</button>
         </div>
-        
+
+        {statusMessage && (
+          <div
+            style={{
+              margin: '12px 20px 0',
+              padding: '10px 14px',
+              borderRadius: 6,
+              fontSize: '0.875rem',
+              ...STATUS_COLORS[statusMessage.type],
+            }}
+          >
+            {statusMessage.text}
+          </div>
+        )}
+
         <div style={{ padding: 20, display: 'flex', gap: 24, flex: 1 }}>
           {/* Cột trái: Các trường nhập liệu cơ bản */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>

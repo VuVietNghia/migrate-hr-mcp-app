@@ -26,6 +26,16 @@ export interface MailDeliveryGateway {
   queueMail(params: SendMailParams): Promise<void>;
 }
 
+/**
+ * The message has already left EmailJS once `queueMail` resolves, so a failure
+ * to write the history row is reported as `sent_unlogged` rather than an error:
+ * surfacing it as a send failure makes the operator resend, and the recipient
+ * gets the same email twice.
+ */
+export type SendTrackedMailOutcome =
+  | { status: 'sent'; record: EmailHistoryRecord }
+  | { status: 'sent_unlogged'; historyError: string };
+
 function toDeliveryParams(payload: StoredEmailPayload): SendMailParams {
   return {
     toName: payload.recipientName,
@@ -43,7 +53,7 @@ export class TrackedMailService {
     private readonly delivery: MailDeliveryGateway,
   ) {}
 
-  async send(request: SendTrackedMailRequest): Promise<EmailHistoryRecord> {
+  async send(request: SendTrackedMailRequest): Promise<SendTrackedMailOutcome> {
     const { roomId, requestedBy, ...payload } = request;
 
     try {
@@ -59,10 +69,13 @@ export class TrackedMailService {
     }
 
     try {
-      return await this.history.createResult(roomId, payload, 'sent', undefined, requestedBy);
+      const record = await this.history.createResult(roomId, payload, 'sent', undefined, requestedBy);
+      return { status: 'sent', record };
     } catch (historyError) {
-      const message = historyError instanceof Error ? historyError.message : String(historyError);
-      throw new Error(`Email đã gửi nhưng không thể lưu lịch sử: ${message}`);
+      const historyErrorMessage = historyError instanceof Error ? historyError.message : String(historyError);
+      // Swallowed on purpose (see SendTrackedMailOutcome) — but never silently.
+      console.warn('[hrm.mail] email delivered, history write failed:', historyErrorMessage);
+      return { status: 'sent_unlogged', historyError: historyErrorMessage };
     }
   }
 
