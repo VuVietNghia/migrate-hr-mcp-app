@@ -10,9 +10,16 @@ import type {
 import { usePolling } from '../hooks/usePolling';
 import { EmailHistoryService } from './email-history-service';
 import { toggleEmailSourceFilter } from './email-mailbox-state';
-import { EmailMailboxView } from './EmailMailboxView';
-import { createInterviewEmailTemplateRepository } from '../email-templates/interview-email-template-default';
+import { EmailMailboxView, type ByTemplateCategory, type TemplatePanelCallbacks } from './EmailMailboxView';
+import {
+  createEmployeeEmailTemplateRepository,
+  createInterviewEmailTemplateRepository,
+} from '../email-templates/interview-email-template-default';
+import type { EmailTemplateCategory } from '../email-templates/interview-email-template-state';
 import './email-tab.css';
+
+const ZERO_COUNTS: ByTemplateCategory<number> = { cv_scored: 0, lifecycle: 0 };
+const NOT_READY: ByTemplateCategory<boolean> = { cv_scored: false, lifecycle: false };
 
 export interface EmailTabProps {
   active: boolean;
@@ -26,8 +33,13 @@ export default function EmailTab({ active }: EmailTabProps) {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
   const service = useMemo(() => app ? new EmailHistoryService(app) : null, [app]);
-  const templateRepository = useMemo(
-    () => app && roomId ? createInterviewEmailTemplateRepository(app, roomId) : null,
+  const templateRepositories = useMemo(
+    () => app && roomId
+      ? {
+          cv_scored: createInterviewEmailTemplateRepository(app, roomId),
+          lifecycle: createEmployeeEmailTemplateRepository(app, roomId),
+        }
+      : null,
     [app, roomId],
   );
   const requestRef = useRef(0);
@@ -43,9 +55,20 @@ export default function EmailTab({ active }: EmailTabProps) {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<EmailHistoryRecord | null>(null);
-  const [templateCreateRequest, setTemplateCreateRequest] = useState(0);
-  const [templateCount, setTemplateCount] = useState(0);
-  const [templateReady, setTemplateReady] = useState(false);
+  const [templateCreateRequests, setTemplateCreateRequests] = useState<ByTemplateCategory<number>>(ZERO_COUNTS);
+  const [templateCounts, setTemplateCounts] = useState<ByTemplateCategory<number>>(ZERO_COUNTS);
+  const [templateReady, setTemplateReady] = useState<ByTemplateCategory<boolean>>(NOT_READY);
+  const templatePanelCallbacks = useMemo<ByTemplateCategory<TemplatePanelCallbacks>>(() => {
+    const forCategory = (category: EmailTemplateCategory): TemplatePanelCallbacks => ({
+      onCountChange: count => setTemplateCounts(current => current[category] === count
+        ? current
+        : { ...current, [category]: count }),
+      onReadyChange: ready => setTemplateReady(current => current[category] === ready
+        ? current
+        : { ...current, [category]: ready }),
+    });
+    return { cv_scored: forCategory('cv_scored'), lifecycle: forCategory('lifecycle') };
+  }, []);
 
   useEffect(() => {
     requestRef.current += 1;
@@ -56,9 +79,9 @@ export default function EmailTab({ active }: EmailTabProps) {
     setSourceFilter('all');
     setQuery('');
     setDateRange({ from: '', to: '' });
-    setTemplateCreateRequest(0);
-    setTemplateCount(0);
-    setTemplateReady(false);
+    setTemplateCreateRequests(ZERO_COUNTS);
+    setTemplateCounts(ZERO_COUNTS);
+    setTemplateReady(NOT_READY);
     setError(null);
     setDeleteCandidate(null);
   }, [roomId]);
@@ -144,10 +167,11 @@ export default function EmailTab({ active }: EmailTabProps) {
       retryingId={retryingId}
       deletingId={deletingId}
       deleteCandidate={deleteCandidate}
-      templateRepository={templateRepository}
-      templateCreateRequest={templateCreateRequest}
-      templateCount={templateCount}
+      templateRepositories={templateRepositories}
+      templateCreateRequests={templateCreateRequests}
+      templateCounts={templateCounts}
       templateReady={templateReady}
+      templatePanelCallbacks={templatePanelCallbacks}
       onSelect={setSelectedId}
       onBack={() => setSelectedId(null)}
       onFilterChange={nextFilter => {
@@ -157,9 +181,10 @@ export default function EmailTab({ active }: EmailTabProps) {
       onSourceFilterChange={source => {
         setSourceFilter(current => filter === 'templates' ? source : toggleEmailSourceFilter(current, source));
       }}
-      onCreateTemplate={() => setTemplateCreateRequest(current => current + 1)}
-      onTemplateCountChange={setTemplateCount}
-      onTemplateReadyChange={setTemplateReady}
+      onCreateTemplate={category => setTemplateCreateRequests(current => ({
+        ...current,
+        [category]: current[category] + 1,
+      }))}
       onQueryChange={setQuery}
       onDateRangeChange={setDateRange}
       onRetry={record => { void handleRetry(record); }}

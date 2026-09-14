@@ -1,8 +1,18 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { EmployeeProfile } from '../types';
 import { parseToolResult, usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
-import { useEmployeeEmailTemplateProvider } from '../di/EmployeeEmailTemplateContext';
+import { useEmployeeEmailTemplateRepository } from '../di/EmployeeEmailTemplateContext';
 import { isValidEmailAddress } from '../../utils/email-validation';
+import {
+  canSendInviteWithTemplate,
+  createInviteTemplateLoadState,
+  loadActiveInviteTemplate,
+  type InviteTemplateLoadState,
+} from '../../cv-scored/invite-template-state';
+import {
+  renderEmployeeEmailTemplate,
+  type EmployeeEmailTemplateVariables,
+} from '../../email-templates/employee-email-template';
 
 interface EmailComposerModalProps {
   isOpen: boolean;
@@ -37,34 +47,59 @@ export function buildLifecycleMailArguments({
   };
 }
 
+export function toEmployeeTemplateVariables(profile: EmployeeProfile): EmployeeEmailTemplateVariables {
+  return {
+    employeeName: profile.name || '',
+    employeeEmail: profile.email || '',
+    position: profile.position || '',
+    department: profile.department || '',
+    startDate: profile.startDate || '',
+  };
+}
+
 export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerModalProps) {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
-  const templateProvider = useEmployeeEmailTemplateProvider();
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  const templateRepository = useEmployeeEmailTemplateRepository();
+  const [templateState, setTemplateState] = useState<InviteTemplateLoadState>(createInviteTemplateLoadState);
   const [subject, setSubject] = useState<string>('');
   const [content, setContent] = useState<string>('');
   const [isSending, setIsSending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
+  // Profile lists are re-polled into fresh objects; keying on the values keeps the user's edits.
+  const variablesKey = JSON.stringify(toEmployeeTemplateVariables(profile));
+
+  // The template is picked in Email → Mẫu email → Nhân sự; each opening renders the active one once,
+  // after which subject and body stay freely editable.
+  useEffect(() => {
+    setTemplateState(createInviteTemplateLoadState());
+    setSubject('');
+    setContent('');
+    if (!isOpen) return;
+
+    let current = true;
+    void loadActiveInviteTemplate(templateRepository, () => current, state => {
+      setTemplateState(state);
+      if (state.activeTemplate) {
+        const variables = JSON.parse(variablesKey) as EmployeeEmailTemplateVariables;
+        const rendered = renderEmployeeEmailTemplate(state.activeTemplate, variables);
+        setSubject(rendered.subject);
+        setContent(rendered.body);
+      }
+    }, 'nhân sự');
+    return () => { current = false; };
+  }, [isOpen, templateRepository, variablesKey]);
+
   if (!isOpen) return null;
 
-  const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const tmplId = e.target.value;
-    setSelectedTemplate(tmplId);
-    
-    const tmpl = templateProvider.getTemplateById(tmplId);
-    if (tmpl) {
-      const draft = tmpl.createDraft(profile);
-      setSubject(draft.subject);
-      setContent(draft.content);
-    } else {
-      setSubject('');
-      setContent('');
-    }
-  };
+  const templateReady = canSendInviteWithTemplate(templateState, templateRepository);
+  const activeTemplateName = templateState.loading
+    ? 'Đang tải mẫu email…'
+    : templateState.activeTemplate?.name || 'Chưa có mẫu đang sử dụng';
 
   const handleSendMail = async () => {
+    if (!templateReady) return;
     if (!subject.trim() || !content.trim()) {
       alert('Vui lòng nhập tiêu đề và nội dung thư');
       return;
@@ -122,6 +157,12 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
           <h3>✉️ Gửi Email cho {profile.name}</h3>
           <button className="bot-template-close-btn" onClick={onClose}>×</button>
         </div>
+        {!templateState.loading && (templateState.error || !templateState.activeTemplate) && (
+          <div role="alert" style={{ margin: '16px 20px 0', color: '#dc2626', fontSize: '13px' }}>
+            <p style={{ margin: 0 }}>{templateState.error || 'Không tìm thấy mẫu email nhân sự đang sử dụng.'}</p>
+            <p style={{ margin: '4px 0 0' }}>Vào Email → Mẫu email → Nhân sự để sửa hoặc chọn mẫu.</p>
+          </div>
+        )}
 
         {statusMessage && (
           <div
@@ -142,16 +183,13 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <label style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text)' }}>Mẫu thư (Template):</label>
-              <select 
-                value={selectedTemplate} 
-                onChange={handleTemplateChange} 
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', outline: 'none' }}
-              >
-                <option value="">-- Chọn mẫu thư --</option>
-                {templateProvider.getTemplates().map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
+              <input
+                type="text"
+                value={activeTemplateName}
+                readOnly
+                title="Đổi mẫu tại Email → Mẫu email → Nhân sự"
+                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', backgroundColor: 'var(--bg-hover)', color: 'var(--text-muted)' }}
+              />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -190,7 +228,7 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
 
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg-table-head)', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
           <button onClick={onClose} disabled={isSending} className="hr-btn">Hủy</button>
-          <button onClick={handleSendMail} disabled={isSending} className="hr-btn hr-btn-accent">
+          <button onClick={handleSendMail} disabled={isSending || !templateReady} className="hr-btn hr-btn-accent">
             {isSending ? 'Đang gửi...' : 'Gửi Email'}
           </button>
         </div>

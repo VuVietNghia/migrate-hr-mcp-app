@@ -6,6 +6,19 @@ in one commit.
 
 ## [Unreleased]
 
+### Added
+
+- **Employee email templates.** Email → Mẫu email → Nhân sự lists, edits, creates and activates
+  lifecycle templates exactly like the interview ones, stored in `hr-miniapp/email/nhan-su` and
+  seeded with the four former built-in drafts. The Hồ sơ NS composer no longer offers a template
+  picker: it renders the Room's active employee template and shows its name read-only.
+
+### Changed
+
+- **The active email template lives in the App Database.** Collection `hr_email_template_settings`
+  (one row per Room per category) replaces the `_active-template.md` pointer file in Room Files.
+  `ensureInitialized` copies an existing pointer into the database and deletes the file.
+
 ### Fixed
 
 - **UI assets no longer 404 after a rebuild.** The shell is now served with its JS and CSS

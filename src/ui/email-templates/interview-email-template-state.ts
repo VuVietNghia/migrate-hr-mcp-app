@@ -276,13 +276,14 @@ export function findCreatedTemplate(
 type TemplatePanelRepository = Pick<IInterviewEmailTemplateRepository,
   'ensureInitialized' | 'createTemplate' | 'saveTemplate' | 'setActiveTemplate' | 'deleteTemplate'>;
 
+export type EmailTemplateCategory = 'cv_scored' | 'lifecycle';
+
 export async function loadTemplatePanelSnapshot(
   repository: TemplatePanelRepository | null,
   active: boolean,
-  category: 'cv_scored' | 'lifecycle',
 ): Promise<InterviewEmailTemplateSnapshot | null> {
-  if (!active || category !== 'cv_scored') return null;
-  if (!repository) throw new Error('Interview email template repository is unavailable');
+  if (!active) return null;
+  if (!repository) throw new Error('Email template repository is unavailable');
   return repository.ensureInitialized();
 }
 
@@ -321,13 +322,17 @@ export async function executeTemplatePanelMutation(
   }) };
 }
 
-export function canCreateInterviewTemplate(
+/** The template list a mailbox source filter shows; "all" never reaches template mode, but maps to interview. */
+export function getTemplateCategory(sourceFilter: 'all' | EmailTemplateCategory): EmailTemplateCategory {
+  return sourceFilter === 'lifecycle' ? 'lifecycle' : 'cv_scored';
+}
+
+export function canCreateEmailTemplate(
   active: boolean,
-  sourceFilter: 'all' | 'cv_scored' | 'lifecycle',
   hasRepository: boolean,
   templateReady: boolean,
 ): boolean {
-  return active && sourceFilter === 'cv_scored' && hasRepository && templateReady;
+  return active && hasRepository && templateReady;
 }
 
 function normalizeTemplateSearchText(value: string): string {
@@ -387,18 +392,14 @@ export function getInterviewEmailTemplateRowKey(template: InterviewEmailTemplate
   return template.fileId || template.fileName;
 }
 
-export function getTemplatePanelMode(category: 'cv_scored' | 'lifecycle'): 'templates' | 'lifecycle-empty' {
-  return category === 'lifecycle' ? 'lifecycle-empty' : 'templates';
-}
-
 export function getEmailMailboxContentMode(
   filter: 'all' | 'sent' | 'failed' | 'templates',
-  sourceFilter: 'all' | 'cv_scored' | 'lifecycle',
+  sourceFilter: 'all' | EmailTemplateCategory,
   hasRepository: boolean,
-): 'history' | 'interview-templates' | 'lifecycle-empty' | 'template-unavailable' {
+): 'history' | 'interview-templates' | 'employee-templates' | 'template-unavailable' {
   if (filter !== 'templates') return 'history';
-  if (sourceFilter === 'lifecycle') return 'lifecycle-empty';
-  return hasRepository ? 'interview-templates' : 'template-unavailable';
+  if (!hasRepository) return 'template-unavailable';
+  return getTemplateCategory(sourceFilter) === 'lifecycle' ? 'employee-templates' : 'interview-templates';
 }
 
 export interface TemplateTokenInsertion {

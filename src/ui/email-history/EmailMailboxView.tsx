@@ -26,9 +26,18 @@ import { canDeleteEmail, canRetryEmail, filterEmailHistory } from '../../service
 import { InterviewEmailTemplatePanel } from '../email-templates/InterviewEmailTemplatePanel';
 import type { IInterviewEmailTemplateRepository } from '../email-templates/interview-email-template-repository';
 import {
-  canCreateInterviewTemplate,
+  canCreateEmailTemplate,
   getEmailMailboxContentMode,
+  getTemplateCategory,
+  type EmailTemplateCategory,
 } from '../email-templates/interview-email-template-state';
+
+export type ByTemplateCategory<T> = Record<EmailTemplateCategory, T>;
+
+export interface TemplatePanelCallbacks {
+  onCountChange: (count: number) => void;
+  onReadyChange: (ready: boolean) => void;
+}
 
 export interface EmailMailboxViewProps {
   records: EmailHistoryRecord[];
@@ -43,17 +52,17 @@ export interface EmailMailboxViewProps {
   retryingId: string | null;
   deletingId: string | null;
   deleteCandidate: EmailHistoryRecord | null;
-  templateRepository: IInterviewEmailTemplateRepository | null;
-  templateCreateRequest: number;
-  templateCount: number;
-  templateReady: boolean;
+  templateRepositories: ByTemplateCategory<IInterviewEmailTemplateRepository> | null;
+  templateCreateRequests: ByTemplateCategory<number>;
+  templateCounts: ByTemplateCategory<number>;
+  templateReady: ByTemplateCategory<boolean>;
+  /** Must be referentially stable: the panels poll through them. */
+  templatePanelCallbacks: ByTemplateCategory<TemplatePanelCallbacks>;
   onSelect: (id: string) => void;
   onBack: () => void;
   onFilterChange: (filter: EmailHistoryFilter) => void;
   onSourceFilterChange: (source: EmailSource) => void;
-  onCreateTemplate: () => void;
-  onTemplateCountChange: (count: number) => void;
-  onTemplateReadyChange: (ready: boolean) => void;
+  onCreateTemplate: (category: EmailTemplateCategory) => void;
   onQueryChange: (query: string) => void;
   onDateRangeChange: (dateRange: EmailHistoryDateRange) => void;
   onRetry: (record: EmailHistoryRecord) => void;
@@ -185,17 +194,16 @@ export function EmailMailboxView({
   retryingId,
   deletingId,
   deleteCandidate,
-  templateRepository,
-  templateCreateRequest,
-  templateCount,
+  templateRepositories,
+  templateCreateRequests,
+  templateCounts,
   templateReady,
+  templatePanelCallbacks,
   onSelect,
   onBack,
   onFilterChange,
   onSourceFilterChange,
   onCreateTemplate,
-  onTemplateCountChange,
-  onTemplateReadyChange,
   onQueryChange,
   onDateRangeChange,
   onRetry,
@@ -213,13 +221,20 @@ export function EmailMailboxView({
     : records.filter(record => record.source === sourceFilter);
   const visibleRecords = isTemplateMode ? [] : filterEmailHistory(records, filter, query, dateRange, sourceFilter);
   const selected = records.find(record => record.id === selectedId) || null;
-  const contentMode = getEmailMailboxContentMode(filter, sourceFilter, Boolean(templateRepository));
+  const contentMode = getEmailMailboxContentMode(filter, sourceFilter, Boolean(templateRepositories));
+  const templateCategory = getTemplateCategory(sourceFilter);
   const counts = {
     all: sourceRecords.length,
     sent: sourceRecords.filter(record => record.status === 'sent').length,
     failed: sourceRecords.filter(record => record.status === 'failed').length,
-    templates: templateCount,
+    templates: sourceFilter === 'all'
+      ? templateCounts.cv_scored + templateCounts.lifecycle
+      : templateCounts[templateCategory],
   };
+  const templatePanels: Array<{ category: EmailTemplateCategory; mode: typeof contentMode }> = [
+    { category: 'cv_scored', mode: 'interview-templates' },
+    { category: 'lifecycle', mode: 'employee-templates' },
+  ];
 
   return (
     <section className="email-mailbox" aria-label="Quản lý email">
@@ -273,8 +288,8 @@ export function EmailMailboxView({
                 <button
                   type="button"
                   className="email-create-template-button"
-                  disabled={!canCreateInterviewTemplate(active, sourceFilter, Boolean(templateRepository), templateReady)}
-                  onClick={onCreateTemplate}
+                  disabled={!canCreateEmailTemplate(active, Boolean(templateRepositories), templateReady[templateCategory])}
+                  onClick={() => onCreateTemplate(templateCategory)}
                 >
                   Tạo mẫu Email
                 </button>
@@ -354,22 +369,19 @@ export function EmailMailboxView({
             </aside>
 
             <div className="email-message-list" aria-label={isTemplateMode ? 'Danh sách mẫu email' : 'Danh sách email'}>
-              {contentMode === 'lifecycle-empty' && (
-                <div className="email-empty-state">Chưa có mẫu email nhân sự</div>
-              )}
-              {templateRepository && (
-                <div hidden={contentMode !== 'interview-templates'}>
+              {templateRepositories && templatePanels.map(({ category, mode }) => (
+                <div key={category} hidden={contentMode !== mode}>
                   <InterviewEmailTemplatePanel
-                    repository={templateRepository}
-                    category="cv_scored"
-                    active={active && contentMode === 'interview-templates'}
-                    createRequest={templateCreateRequest}
+                    repository={templateRepositories[category]}
+                    category={category}
+                    active={active && contentMode === mode}
+                    createRequest={templateCreateRequests[category]}
                     query={query}
-                    onCountChange={onTemplateCountChange}
-                    onReadyChange={onTemplateReadyChange}
+                    onCountChange={templatePanelCallbacks[category].onCountChange}
+                    onReadyChange={templatePanelCallbacks[category].onReadyChange}
                   />
                 </div>
-              )}
+              ))}
               {contentMode === 'template-unavailable' && (
                 <div className="email-empty-state">Không thể truy cập mẫu email</div>
               )}
