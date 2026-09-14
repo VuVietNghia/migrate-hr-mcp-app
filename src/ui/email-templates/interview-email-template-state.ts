@@ -322,17 +322,20 @@ export async function executeTemplatePanelMutation(
   }) };
 }
 
-/** The template list a mailbox source filter shows; "all" never reaches template mode, but maps to interview. */
-export function getTemplateCategory(sourceFilter: 'all' | EmailTemplateCategory): EmailTemplateCategory {
-  return sourceFilter === 'lifecycle' ? 'lifecycle' : 'cv_scored';
-}
-
 export function canCreateEmailTemplate(
   active: boolean,
   hasRepository: boolean,
   templateReady: boolean,
 ): boolean {
   return active && hasRepository && templateReady;
+}
+
+/** Whether a category's panel is on screen: its own filter, or no filter at all ("all" shows both lists). */
+export function isTemplateCategoryVisible(
+  templateFilter: 'all' | EmailTemplateCategory,
+  category: EmailTemplateCategory,
+): boolean {
+  return templateFilter === 'all' || templateFilter === category;
 }
 
 function normalizeTemplateSearchText(value: string): string {
@@ -392,14 +395,19 @@ export function getInterviewEmailTemplateRowKey(template: InterviewEmailTemplate
   return template.fileId || template.fileName;
 }
 
+/**
+ * `templateFilter` is the template list's own Phỏng vấn / Nhân sự toggle, deliberately separate from the
+ * history source filter: picking a template category must not leave "Tất cả" / "Đã gửi" filtered.
+ */
 export function getEmailMailboxContentMode(
   filter: 'all' | 'sent' | 'failed' | 'templates',
-  sourceFilter: 'all' | EmailTemplateCategory,
+  templateFilter: 'all' | EmailTemplateCategory,
   hasRepository: boolean,
-): 'history' | 'interview-templates' | 'employee-templates' | 'template-unavailable' {
+): 'history' | 'all-templates' | 'interview-templates' | 'employee-templates' | 'template-unavailable' {
   if (filter !== 'templates') return 'history';
   if (!hasRepository) return 'template-unavailable';
-  return getTemplateCategory(sourceFilter) === 'lifecycle' ? 'employee-templates' : 'interview-templates';
+  if (templateFilter === 'all') return 'all-templates';
+  return templateFilter === 'lifecycle' ? 'employee-templates' : 'interview-templates';
 }
 
 export interface TemplateTokenInsertion {
