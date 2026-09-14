@@ -1,11 +1,11 @@
 import type { McpApp } from '@privos_ai/app-react';
+import type { ActiveTemplateStore } from './active-template-store';
 import {
   ACTIVE_TEMPLATE_FILE_NAME,
   createUniqueTemplateId,
   INTERVIEW_EMAIL_TEMPLATE_FOLDER,
   parseActiveTemplateId,
   parseInterviewEmailTemplate,
-  serializeActiveTemplateId,
   serializeInterviewEmailTemplate,
   type InterviewEmailTemplateDocument,
   type InterviewEmailTemplateDraft,
@@ -89,6 +89,14 @@ export interface EmailTemplateRepositoryOptions {
   label?: string;
 }
 
+interface LoadedTemplateSnapshot {
+  snapshot: InterviewEmailTemplateSnapshot;
+  /** Id held by the App Database store, before any legacy fallback. */
+  storedTemplateId: string | null;
+  /** A pre-App-Database `_active-template.md` still sitting in the folder. */
+  legacyPointerFile: InterviewEmailTemplateFile | undefined;
+}
+
 export class InterviewEmailTemplateRepository implements IInterviewEmailTemplateRepository {
   private readonly defaultTemplateMarkdowns: readonly string[];
   private readonly defaultActiveTemplateId: string;
@@ -96,6 +104,7 @@ export class InterviewEmailTemplateRepository implements IInterviewEmailTemplate
 
   constructor(
     private readonly gateway: InterviewEmailTemplateFileGateway,
+    private readonly activeTemplateStore: ActiveTemplateStore,
     defaultTemplateMarkdown: string | readonly string[],
     options: EmailTemplateRepositoryOptions = {},
   ) {
@@ -107,6 +116,11 @@ export class InterviewEmailTemplateRepository implements IInterviewEmailTemplate
   }
 
   async ensureInitialized(): Promise<InterviewEmailTemplateSnapshot> {
+    const loaded = await this.loadSnapshot();
+    if (loaded.legacyPointerFile) {
+      await this.migrateLegacyPointer(loaded);
+    }
+
     let snapshot = await this.listTemplates();
     let validTemplates = snapshot.templates.filter(template => template.validationError === null);
 
@@ -137,7 +151,7 @@ export class InterviewEmailTemplateRepository implements IInterviewEmailTemplate
       if (!fallbackTemplate) {
         throw new Error(`No valid ${this.label} email template is available after initialization`);
       }
-      await this.gateway.write(ACTIVE_TEMPLATE_FILE_NAME, serializeActiveTemplateId(fallbackTemplate.id));
+      await this.activeTemplateStore.write(fallbackTemplate.id);
       snapshot = await this.listTemplates();
     }
 
@@ -145,6 +159,27 @@ export class InterviewEmailTemplateRepository implements IInterviewEmailTemplate
   }
 
   async listTemplates(): Promise<InterviewEmailTemplateSnapshot> {
+    return (await this.loadSnapshot()).snapshot;
+  }
+
+  /**
+   * Rooms set up before the App Database pointer kept the active id in `_active-template.md`.
+   * Copy it into the store first, then drop the file; the store is authoritative from then on, so a
+   * failed delete (e.g. another tab migrated at the same time) only leaves a file nothing reads.
+   */
+  private async migrateLegacyPointer(loaded: LoadedTemplateSnapshot): Promise<void> {
+    const legacyTemplateId = loaded.snapshot.activeTemplateId;
+    if (loaded.storedTemplateId === null && legacyTemplateId) {
+      await this.activeTemplateStore.write(legacyTemplateId);
+    }
+    try {
+      await this.gateway.delete(loaded.legacyPointerFile!.id);
+    } catch (error) {
+      console.warn(`[EmailTemplates] Không xóa được file ${ACTIVE_TEMPLATE_FILE_NAME} cũ`, error);
+    }
+  }
+
+  private async loadSnapshot(): Promise<LoadedTemplateSnapshot> {
     const folderId = await this.gateway.ensureFolder();
     const files = await this.gateway.listFiles(folderId);
     const pointerFile = files.find(file => file.name === ACTIVE_TEMPLATE_FILE_NAME);
@@ -183,16 +218,21 @@ export class InterviewEmailTemplateRepository implements IInterviewEmailTemplate
       return validity || left.name.localeCompare(right.name, 'vi') || left.fileName.localeCompare(right.fileName, 'vi');
     });
 
-    const pointerTemplateId = pointerFile
+    const storedTemplateId = await this.activeTemplateStore.read();
+    const pointerTemplateId = storedTemplateId ?? (pointerFile
       ? parseActiveTemplateId(await this.gateway.read(pointerFile.name, pointerFile.id, pointerFile.downloadUrl))
-      : null;
+      : null);
     const activeMatches = pointerTemplateId
       ? templates.filter(template => template.id === pointerTemplateId && template.validationError === null)
       : [];
 
     return {
-      templates,
-      activeTemplateId: activeMatches.length === 1 ? pointerTemplateId : null,
+      snapshot: {
+        templates,
+        activeTemplateId: activeMatches.length === 1 ? pointerTemplateId : null,
+      },
+      storedTemplateId,
+      legacyPointerFile: pointerFile,
     };
   }
 
@@ -244,7 +284,7 @@ export class InterviewEmailTemplateRepository implements IInterviewEmailTemplate
     if (template.validationError) {
       throw new Error(`Không thể sử dụng mẫu email không hợp lệ: ${template.validationError}`);
     }
-    await this.gateway.write(ACTIVE_TEMPLATE_FILE_NAME, serializeActiveTemplateId(template.id));
+    await this.activeTemplateStore.write(template.id);
     return this.listTemplates();
   }
 

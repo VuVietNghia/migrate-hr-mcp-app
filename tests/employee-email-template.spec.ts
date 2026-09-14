@@ -8,6 +8,13 @@ import {
   type InterviewEmailTemplateFileGateway,
 } from '../src/ui/email-templates/interview-email-template-repository';
 import { getEmailMailboxContentMode } from '../src/ui/email-templates/interview-email-template-state';
+import type { ActiveTemplateStore } from '../src/ui/email-templates/active-template-store';
+
+class MemoryStore implements ActiveTemplateStore {
+  constructor(public value: string | null = null) {}
+  async read() { return this.value; }
+  async write(templateId: string) { this.value = templateId; }
+}
 
 class MemoryGateway implements InterviewEmailTemplateFileGateway {
   readonly files = new Map<string, string>();
@@ -33,7 +40,8 @@ describe('employee email templates', () => {
 
   it('seeds all four templates into an empty folder and activates the default one', async () => {
     const gateway = new MemoryGateway();
-    const repository = new InterviewEmailTemplateRepository(gateway, DEFAULT_EMPLOYEE_TEMPLATE_MARKDOWNS, {
+    const store = new MemoryStore();
+    const repository = new InterviewEmailTemplateRepository(gateway, store, DEFAULT_EMPLOYEE_TEMPLATE_MARKDOWNS, {
       defaultActiveTemplateId: DEFAULT_EMPLOYEE_TEMPLATE_ID,
       label: 'nhân sự',
     });
@@ -42,8 +50,47 @@ describe('employee email templates', () => {
 
     expect(snapshot.templates).toHaveLength(4);
     expect(snapshot.activeTemplateId).toBe(DEFAULT_EMPLOYEE_TEMPLATE_ID);
+    expect(store.value).toBe(DEFAULT_EMPLOYEE_TEMPLATE_ID);
+    expect([...gateway.files.keys()]).not.toContain('_active-template.md');
     // A second initialization must not re-seed or duplicate.
     expect((await repository.ensureInitialized()).templates).toHaveLength(4);
+  });
+
+  it('keeps the active choice in the store, never in a Room Files pointer', async () => {
+    const gateway = new MemoryGateway();
+    const store = new MemoryStore();
+    const repository = new InterviewEmailTemplateRepository(gateway, store, DEFAULT_EMPLOYEE_TEMPLATE_MARKDOWNS, {
+      defaultActiveTemplateId: DEFAULT_EMPLOYEE_TEMPLATE_ID,
+    });
+    await repository.ensureInitialized();
+
+    const snapshot = await repository.setActiveTemplate('thong-bao-ky-gia-han-hop-dong');
+
+    expect(snapshot.activeTemplateId).toBe('thong-bao-ky-gia-han-hop-dong');
+    expect(store.value).toBe('thong-bao-ky-gia-han-hop-dong');
+    expect([...gateway.files.keys()]).not.toContain('_active-template.md');
+  });
+
+  it('migrates a legacy _active-template.md into the store and deletes the file', async () => {
+    const gateway = new MemoryGateway();
+    for (const markdown of DEFAULT_EMPLOYEE_TEMPLATE_MARKDOWNS) {
+      const template = parseInterviewEmailTemplate('x.md', 'x', markdown);
+      gateway.files.set(`${template.id}.md`, markdown);
+    }
+    gateway.files.set('_active-template.md', '# Active interview email template\n\nactive_template_id: thong-bao-danh-gia-ket-thuc-thu-viec\n');
+    const store = new MemoryStore();
+    const repository = new InterviewEmailTemplateRepository(gateway, store, DEFAULT_EMPLOYEE_TEMPLATE_MARKDOWNS, {
+      defaultActiveTemplateId: DEFAULT_EMPLOYEE_TEMPLATE_ID,
+    });
+
+    // Before migration the legacy file still answers reads, so an un-migrated Room keeps its choice.
+    expect((await repository.listTemplates()).activeTemplateId).toBe('thong-bao-danh-gia-ket-thuc-thu-viec');
+
+    const snapshot = await repository.ensureInitialized();
+
+    expect(snapshot.activeTemplateId).toBe('thong-bao-danh-gia-ket-thuc-thu-viec');
+    expect(store.value).toBe('thong-bao-danh-gia-ket-thuc-thu-viec');
+    expect(gateway.files.has('_active-template.md')).toBe(false);
   });
 
   it('renders profile values and keeps visible placeholders for blank fields', () => {

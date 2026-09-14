@@ -1,4 +1,5 @@
 export const INTERVIEW_EMAIL_TEMPLATE_FOLDER = ['hr-miniapp', 'email', 'phong-van'] as const;
+/** Legacy pointer file, migrated into the App Database and deleted by `ensureInitialized`. */
 export const ACTIVE_TEMPLATE_FILE_NAME = '_active-template.md';
 
 export interface InterviewEmailTemplateDraft {
@@ -180,13 +181,7 @@ export function renderInterviewEmailTemplate(
   };
 }
 
-export function serializeActiveTemplateId(id: string): string {
-  if (!TEMPLATE_ID_PATTERN.test(id)) {
-    throw new Error('Active template id is invalid');
-  }
-  return `# Active email template\n\nactive_template_id: ${id}\n`;
-}
-
+/** Reads a legacy `_active-template.md` pointer; new selections live in the App Database. */
 export function parseActiveTemplateId(markdown: string): string | null {
   const match = /^active_template_id:\s*(\S+)\s*$/m.exec(markdown);
   return match && TEMPLATE_ID_PATTERN.test(match[1]) ? match[1] : null;

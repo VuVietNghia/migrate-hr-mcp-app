@@ -4,6 +4,7 @@ import profileCompletionMarkdown from '../data/email-templates/nhan-su/yeu-cau-b
 import contractMarkdown from '../data/email-templates/nhan-su/thong-bao-ky-gia-han-hop-dong.md?raw';
 import probationMarkdown from '../data/email-templates/nhan-su/thong-bao-danh-gia-ket-thuc-thu-viec.md?raw';
 import informationUpdateMarkdown from '../data/email-templates/nhan-su/thong-bao-cap-nhat-thong-tin-nhan-su.md?raw';
+import { AppDbActiveTemplateStore } from './active-template-store';
 import {
   InterviewEmailTemplateRepository,
   PrivosInterviewEmailTemplateFileGateway,
@@ -22,6 +23,7 @@ export const DEFAULT_EMPLOYEE_TEMPLATE_MARKDOWNS = [
 export function createInterviewEmailTemplateRepository(app: McpApp, roomId: string) {
   return new InterviewEmailTemplateRepository(
     new PrivosInterviewEmailTemplateFileGateway(app, roomId),
+    new AppDbActiveTemplateStore(app, roomId, 'cv_scored'),
     defaultTemplateMarkdown,
   );
 }
@@ -30,6 +32,7 @@ export function createInterviewEmailTemplateRepository(app: McpApp, roomId: stri
 export function createEmployeeEmailTemplateRepository(app: McpApp, roomId: string) {
   return new InterviewEmailTemplateRepository(
     new PrivosInterviewEmailTemplateFileGateway(app, roomId, EMPLOYEE_EMAIL_TEMPLATE_FOLDER),
+    new AppDbActiveTemplateStore(app, roomId, 'lifecycle'),
     DEFAULT_EMPLOYEE_TEMPLATE_MARKDOWNS,
     { defaultActiveTemplateId: DEFAULT_EMPLOYEE_TEMPLATE_ID, label: 'nhân sự' },
   );
