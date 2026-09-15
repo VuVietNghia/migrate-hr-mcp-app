@@ -742,6 +742,20 @@
   color: #FFFFFF;
 }
 
+/* Nút mở JSON gốc từ Database: dùng tông accent thay vì hr-btn-subtle vì
+   subtle (nền/viền trong suốt, chữ text-muted) chìm vào cả nền Light lẫn Dark. */
+.payroll-debug-btn {
+  background: rgba(21, 111, 245, 0.1);
+  border-color: rgba(21, 111, 245, 0.2);
+  color: var(--accent, #156FF5);
+}
+
+.payroll-debug-btn:hover:not(:disabled) {
+  background: var(--accent, #156FF5);
+  border-color: var(--accent, #156FF5);
+  color: #FFFFFF;
+}
+
 /* Forms */
 .hr-form-panel {
   background: var(--bg-card, #FFFFFF);
