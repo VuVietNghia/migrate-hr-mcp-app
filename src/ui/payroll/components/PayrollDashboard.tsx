@@ -16,6 +16,18 @@ import {
   type PayrollExportFormat,
   type PayrollExportScope,
 } from '../services/PayrollExportService';
+import {
+  calculatePayrollStats,
+  countPayrollFilters,
+  hasConfiguredSalary,
+  isResignedStatus,
+  matchesPayrollFilter,
+  partitionByEmploymentStatus,
+  selectEmploymentSegment,
+  sumNetPayroll,
+  type EmploymentFilter,
+  type PayrollFilterStatus,
+} from '../payroll-selectors';
 
 interface PayrollDashboardProps {
   roomId: string;
@@ -60,13 +72,17 @@ const SALARY_REGEX = /^\d{1,12}$/;
 const TAX_ID_REGEX = /^(?:\d{10}|\d{12}|\d{10}-?\d{3})$/;
 const BANK_ACCOUNT_REGEX = /^[0-9-]{6,24}$/;
 
-type PayrollFilterStatus = 'all' | 'configured' | 'unconfigured' | 'missing_info';
-
 const PAYROLL_FILTER_LABELS: Record<PayrollFilterStatus, string> = {
   all: 'Tat_Ca_Trang_Thai',
   configured: 'Da_Co_Luong',
   unconfigured: 'Chua_Thiet_Lap',
   missing_info: 'Thieu_STK_MST',
+};
+
+const EMPLOYMENT_FILTER_LABELS: Record<EmploymentFilter, string> = {
+  active: 'Dang_Lam_Viec',
+  resigned: 'Da_Nghi_Viec',
+  all: 'Tat_Ca_Nhan_Su',
 };
 
 const PAYROLL_EXPORT_FORMAT_LABELS: Record<PayrollExportFormat, string> = {
@@ -100,29 +116,6 @@ const PAYROLL_EXPORT_GROUPS: ReadonlyArray<{
     ],
   },
 ];
-
-interface PayrollFilterCounts {
-  all: number;
-  configured: number;
-  unconfigured: number;
-  missingInfo: number;
-}
-
-function hasConfiguredSalary(payroll?: PayrollRecord): boolean {
-  return (payroll?.baseSalary ?? 0) > 0;
-}
-
-function isPaymentInfoMissing(payroll?: PayrollRecord): boolean {
-  return hasConfiguredSalary(payroll)
-    && (!payroll?.taxId?.trim() || !payroll?.bankAccount?.trim());
-}
-
-function matchesPayrollFilter(payroll: PayrollRecord | undefined, filter: PayrollFilterStatus): boolean {
-  if (filter === 'configured') return hasConfiguredSalary(payroll);
-  if (filter === 'unconfigured') return !hasConfiguredSalary(payroll);
-  if (filter === 'missing_info') return isPaymentInfoMissing(payroll);
-  return true;
-}
 
 function areEmployeeProfilesEqual(prev: EmployeeProfile[], next: EmployeeProfile[]): boolean {
   if (prev.length !== next.length) return false;
@@ -179,6 +172,7 @@ export function PayrollDashboard({
   // States cho Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<PayrollFilterStatus>('all');
+  const [employmentFilter, setEmploymentFilter] = useState<EmploymentFilter>('active');
   const [selectedDept, setSelectedDept] = useState<string>('all');
   const isRefreshingDataRef = useRef(false);
   
@@ -199,9 +193,11 @@ export function PayrollDashboard({
         payrollService.getRecords()
       ]);
 
-      // DỌN RÁC (Garbage Collection): Xoá bản ghi lương nếu nhân viên không còn tồn tại
-      const activeEmpIds = new Set(empData.map(e => e._id));
-      const orphanedPayrolls = payData.filter(p => !activeEmpIds.has(p.employeeId));
+      // DỌN RÁC (Garbage Collection): Xoá bản ghi lương nếu nhân viên không còn tồn tại.
+      // Đối chiếu theo mọi hồ sơ còn tồn tại, không phân biệt còn làm hay đã nghỉ: người
+      // đã nghỉ vẫn phải giữ bản ghi lương để tất toán.
+      const knownEmployeeIds = new Set(empData.map(e => e._id));
+      const orphanedPayrolls = payData.filter(p => !knownEmployeeIds.has(p.employeeId));
       
       if (!isSilent && orphanedPayrolls.length > 0) {
         console.log(`Tiến hành dọn rác: Xoá ${orphanedPayrolls.length} bản ghi lương mồ côi.`);
@@ -210,9 +206,9 @@ export function PayrollDashboard({
         }));
       }
 
-      const activePayrolls = payData.filter(p => activeEmpIds.has(p.employeeId));
+      const linkedPayrolls = payData.filter(p => knownEmployeeIds.has(p.employeeId));
       setEmployees((previous) => (areEmployeeProfilesEqual(previous, empData) ? previous : empData));
-      setPayrolls((previous) => (arePayrollRecordsEqual(previous, activePayrolls) ? previous : activePayrolls));
+      setPayrolls((previous) => (arePayrollRecordsEqual(previous, linkedPayrolls) ? previous : linkedPayrolls));
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu lương:", error);
       if (!isSilent) {
@@ -331,52 +327,35 @@ export function PayrollDashboard({
     [employees, selectedDept]
   );
 
-  // KPIs calculations
-  const stats = useMemo(() => {
-    const relevantEmployees = employeesInSelectedDepartment;
+  const employmentPartition = useMemo(
+    () => partitionByEmploymentStatus(employeesInSelectedDepartment),
+    [employeesInSelectedDepartment]
+  );
 
-    const totalStaff = relevantEmployees.length;
-    const configuredCount = relevantEmployees.filter(emp => {
-      return hasConfiguredSalary(payrollByEmployeeId.get(emp._id));
-    }).length;
+  // Người đã nghỉ việc không còn nằm trong quỹ lương định kỳ, nên mọi KPI chỉ tính nhóm đang làm việc.
+  const stats = useMemo(
+    () => calculatePayrollStats(employmentPartition.active, payrollByEmployeeId),
+    [employmentPartition, payrollByEmployeeId]
+  );
 
-    // Tính tổng quỹ lương thực nhận (đã tính tỷ lệ thử việc 85% nếu có)
-    const totalBudget = relevantEmployees.reduce((acc, emp) => {
-      const pay = payrollByEmployeeId.get(emp._id);
-      if (!pay || !pay.baseSalary) return acc;
-      const { netSalary } = calculateNetSalary(
-        pay.baseSalary,
-        pay.contractType,
-        pay.applyProbationRate !== false,
-        pay.probationRate ?? 85
-      );
-      return acc + netSalary;
-    }, 0);
+  const employmentScopedEmployees = useMemo(
+    () => selectEmploymentSegment(employmentPartition, employmentFilter),
+    [employmentPartition, employmentFilter]
+  );
 
-    const fullyCompleted = relevantEmployees.filter(emp => {
-      const pay = payrollByEmployeeId.get(emp._id);
-      return pay && (pay.baseSalary ?? 0) > 0 && !!pay.taxId && !!pay.bankAccount;
-    }).length;
+  const resignedBudget = useMemo(
+    () => sumNetPayroll(employmentPartition.resigned, payrollByEmployeeId),
+    [employmentPartition, payrollByEmployeeId]
+  );
 
-    const completionRate = totalStaff > 0 ? Math.round((fullyCompleted / totalStaff) * 100) : 0;
-
-    return { totalStaff, configuredCount, totalBudget, fullyCompleted, completionRate };
-  }, [employeesInSelectedDepartment, payrollByEmployeeId]);
-
-  const filterCounts = useMemo<PayrollFilterCounts>(() => {
-    return employeesInSelectedDepartment.reduce<PayrollFilterCounts>((counts, employee) => {
-      const payroll = payrollByEmployeeId.get(employee._id);
-      counts.all += 1;
-      if (hasConfiguredSalary(payroll)) counts.configured += 1;
-      else counts.unconfigured += 1;
-      if (isPaymentInfoMissing(payroll)) counts.missingInfo += 1;
-      return counts;
-    }, { all: 0, configured: 0, unconfigured: 0, missingInfo: 0 });
-  }, [employeesInSelectedDepartment, payrollByEmployeeId]);
+  const filterCounts = useMemo(
+    () => countPayrollFilters(employmentScopedEmployees, payrollByEmployeeId),
+    [employmentScopedEmployees, payrollByEmployeeId]
+  );
 
   // Filtered employees list
   const filteredEmployees = useMemo(() => {
-    return employeesInSelectedDepartment.filter(emp => {
+    return employmentScopedEmployees.filter(emp => {
       const payroll = payrollByEmployeeId.get(emp._id);
       if (!matchesPayrollFilter(payroll, filterStatus)) return false;
 
@@ -390,7 +369,7 @@ export function PayrollDashboard({
 
       return matchName || matchPosition || matchDept || matchTax || matchBank;
     });
-  }, [employeesInSelectedDepartment, filterStatus, payrollByEmployeeId, searchTerm]);
+  }, [employmentScopedEmployees, filterStatus, payrollByEmployeeId, searchTerm]);
 
   const handleExport = async (
     scope: PayrollExportScope,
@@ -415,7 +394,7 @@ export function PayrollDashboard({
         destination,
         filterContext: {
           department: selectedDept === 'all' ? 'Tat_Ca_Phong_Ban' : selectedDept,
-          status: PAYROLL_FILTER_LABELS[filterStatus],
+          status: `${PAYROLL_FILTER_LABELS[filterStatus]}_${EMPLOYMENT_FILTER_LABELS[employmentFilter]}`,
         },
       });
       const destinationLabel = destination === 'privos'
@@ -534,7 +513,7 @@ export function PayrollDashboard({
           <div className="hr-stat-icon">👥</div>
           <div className="hr-stat-content">
             <span className="hr-stat-label">
-              {selectedDept === 'all' ? 'Tổng số nhân sự' : `Nhân sự (${selectedDept})`}
+              {selectedDept === 'all' ? 'Nhân sự đang làm việc' : `Đang làm việc (${selectedDept})`}
             </span>
             <span className="hr-stat-value">{stats.totalStaff}</span>
           </div>
@@ -547,6 +526,11 @@ export function PayrollDashboard({
             <span className="hr-stat-value" style={{ color: '#148660' }}>
               {formatCurrency(stats.totalBudget)}
             </span>
+            {employmentPartition.resigned.length > 0 && (
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                Chưa gồm {employmentPartition.resigned.length} nhân sự đã nghỉ ({formatCurrency(resignedBudget)})
+              </span>
+            )}
           </div>
         </div>
 
@@ -586,6 +570,20 @@ export function PayrollDashboard({
           </div>
 
           <select
+            aria-label="Lọc theo trạng thái làm việc"
+            className="hr-input"
+            value={employmentFilter}
+            onChange={(event) => setEmploymentFilter(event.target.value as EmploymentFilter)}
+            style={{ width: 'auto', minWidth: '190px' }}
+          >
+            <option value="active">Đang làm việc ({employmentPartition.active.length})</option>
+            <option value="resigned">Đã nghỉ việc ({employmentPartition.resigned.length})</option>
+            <option value="all">
+              Tất cả nhân sự ({employmentPartition.active.length + employmentPartition.resigned.length})
+            </option>
+          </select>
+
+          <select
             aria-label="Lọc theo tình trạng lương"
             className="hr-input"
             value={filterStatus}
@@ -621,6 +619,13 @@ export function PayrollDashboard({
         </div>
       </div>
 
+      {employmentFilter !== 'active' && employmentPartition.resigned.length > 0 && (
+        <div className="hr-status-banner hr-status-info">
+          Quỹ lương chờ tất toán của {employmentPartition.resigned.length} nhân sự đã nghỉ: {formatCurrency(resignedBudget)}.
+          Khoản này không nằm trong Tổng quỹ lương thực chi.
+        </div>
+      )}
+
       {/* Modern Data Table */}
       <div className="hr-table-card">
         <table className="hr-table">
@@ -649,7 +654,12 @@ export function PayrollDashboard({
                         {initials}
                       </div>
                       <div>
-                        <div style={{ fontWeight: 600, color: 'var(--text)' }}>{emp.name}</div>
+                        <div style={{ fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {emp.name}
+                          {isResignedStatus(emp.status) && (
+                            <span className="hr-status-pill hr-status-pill-resigned">Đã nghỉ việc</span>
+                          )}
+                        </div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                           {emp.position || 'Nhân sự'} {emp.department ? `• ${emp.department}` : ''}
                         </div>

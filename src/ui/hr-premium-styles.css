@@ -857,6 +857,11 @@
   color: var(--status-warn, #D97706);
 }
 
+.hr-status-pill-resigned {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+}
+
 /* Debug Modal / Panel */
 .hr-debug-modal-overlay {
   position: fixed;
