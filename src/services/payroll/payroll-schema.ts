@@ -20,6 +20,13 @@ export const PAYROLL_FIELDS = [
 	{ name: 'contractType', type: 'string', maxLength: 64 },
 	{ name: 'applyProbationRate', type: 'boolean' },
 	{ name: 'probationRate', type: 'number', min: 0, max: 100 },
+	/**
+	 * Soft-delete tombstone: an ISO-8601 timestamp when the row is deleted, absent or empty
+	 * otherwise. Payroll rows are never removed from the collection. `PayrollDashboard`'s garbage
+	 * collector used to hard-delete any row whose employee it could not match against the roster,
+	 * so one truncated or failed roster read was unrecoverable.
+	 */
+	{ name: 'deletedAt', type: 'string', maxLength: 32 },
 ] as const;
 
 /**
@@ -52,4 +59,35 @@ export function isAlreadyRegisteredError(error: unknown): boolean {
  */
 export function byCreatedAtDesc(a: { _createdAt?: string }, b: { _createdAt?: string }): number {
 	return (b._createdAt ?? '').localeCompare(a._createdAt ?? '');
+}
+
+/**
+ * A row is live until it carries a `deletedAt` tombstone.
+ *
+ * Reads filter on this in memory rather than in a `where` clause: rows written before `deletedAt`
+ * was registered have no such field at all, and a `where deletedAt == null` clause is not
+ * guaranteed to match a document that is missing the field entirely. Reviving a row clears the
+ * tombstone by writing `''`, which is falsy here — the schema types the field as a string, so
+ * there is no null to write.
+ */
+export function isLivePayrollRecord(record: { deletedAt?: string }): boolean {
+	return !record.deletedAt;
+}
+
+/**
+ * Whether a row found by an employee lookup may be REVIVED by a create, rather than created anew.
+ *
+ * Only a tombstoned row may be. Reviving a LIVE row would write the caller's fields straight over
+ * an existing salary — no tombstone, no recovery — which is exactly the collision the unique
+ * `{ roomId, employeeId }` index exists to prevent. `hrm.payroll.create` retried after a timed-out
+ * first call, or two admins saving the same new employee, would silently destroy the earlier
+ * figure. When the row is live the caller MUST fall through to a plain create and let the index
+ * reject the write loudly. Both mirrors (`AppDbPayrollRepository.create`, `PayrollService
+ * .saveRecord`) call this so the decision exists once.
+ */
+export function isRevivableRecord<T extends { _id?: string; deletedAt?: string }>(
+	record: T | null | undefined,
+): record is T & { _id: string } {
+	if (!record || !record._id) return false;
+	return !isLivePayrollRecord(record);
 }

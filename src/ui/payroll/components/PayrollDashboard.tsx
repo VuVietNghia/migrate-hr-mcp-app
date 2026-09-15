@@ -24,6 +24,7 @@ import {
   matchesPayrollFilter,
   partitionByEmploymentStatus,
   selectEmploymentSegment,
+  selectOrphanedPayrolls,
   sumNetPayroll,
   type EmploymentFilter,
   type PayrollFilterStatus,
@@ -193,17 +194,23 @@ export function PayrollDashboard({
         payrollService.getRecords()
       ]);
 
-      // DỌN RÁC (Garbage Collection): Xoá bản ghi lương nếu nhân viên không còn tồn tại.
-      // Đối chiếu theo mọi hồ sơ còn tồn tại, không phân biệt còn làm hay đã nghỉ: người
-      // đã nghỉ vẫn phải giữ bản ghi lương để tất toán.
+      // DỌN RÁC: đánh dấu xoá bản ghi lương của nhân viên không còn trên roster. Từ Task 4 đây là
+      // soft-delete nên có thể khôi phục; `selectOrphanedPayrolls` từ chối chạy khi roster rỗng vì
+      // roster rỗng nghĩa là đọc lỗi, không phải mọi người đã nghỉ.
       const knownEmployeeIds = new Set(empData.map(e => e._id));
-      const orphanedPayrolls = payData.filter(p => !knownEmployeeIds.has(p.employeeId));
-      
+      const orphanedPayrolls = selectOrphanedPayrolls(empData, payData);
+
       if (!isSilent && orphanedPayrolls.length > 0) {
-        console.log(`Tiến hành dọn rác: Xoá ${orphanedPayrolls.length} bản ghi lương mồ côi.`);
-        await Promise.all(orphanedPayrolls.map(p => {
-          if (p._id) return payrollService.deleteRecord(p._id);
-        }));
+        console.log(`Tiến hành dọn rác: đánh dấu xoá ${orphanedPayrolls.length} bản ghi lương mồ côi.`);
+        const outcomes = await Promise.allSettled(
+          orphanedPayrolls.map(p => payrollService.deleteRecord(p._id!))
+        );
+        for (const outcome of outcomes) {
+          // Một lần đánh dấu thất bại không được làm hỏng cả lượt tải — phần dữ liệu còn lại vẫn đúng.
+          if (outcome.status === 'rejected') {
+            console.error('Dọn rác bản ghi lương thất bại:', outcome.reason);
+          }
+        }
       }
 
       const linkedPayrolls = payData.filter(p => knownEmployeeIds.has(p.employeeId));

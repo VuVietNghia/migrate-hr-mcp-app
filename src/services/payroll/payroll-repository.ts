@@ -26,9 +26,11 @@ export interface PayrollDocument {
 	readonly probationRate?: number;
 	readonly _createdAt?: string;
 	readonly _updatedAt?: string;
+	/** Soft-delete tombstone — see `isLivePayrollRecord` in `payroll-schema.ts`. Server-owned. */
+	readonly deletedAt?: string;
 }
 
-export type PayrollInput = Omit<PayrollDocument, '_id' | 'roomId' | '_createdAt' | '_updatedAt'>;
+export type PayrollInput = Omit<PayrollDocument, '_id' | 'roomId' | '_createdAt' | '_updatedAt' | 'deletedAt'>;
 
 export interface IPayrollRepository {
 	initializeSchema(roomId: string): Promise<void>;

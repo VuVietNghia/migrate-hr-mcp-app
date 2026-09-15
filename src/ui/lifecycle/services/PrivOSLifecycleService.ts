@@ -7,6 +7,12 @@ export class PrivOSLifecycleService implements ILifecycleService {
   private static readonly SYSTEM_CONFIG_NAME = '[Hệ thống] Không xoá - Cấu hình Kanban';
   private static readonly DEFAULT_STAGE = 'Mới nhận việc';
 
+  /** One `mcpapp.lists.getItems` page. 100 is the value this call has used since the migration. */
+  private static readonly ITEMS_PAGE_SIZE = 100;
+
+  /** 100 × 100 = 10,000 items — the same ceiling `PAYROLL_MAX_PAGES` gives the payroll read. */
+  private static readonly ITEMS_MAX_PAGES = 100;
+
   constructor(private app: McpApp) { }
 
   async loadProfiles(roomId: string): Promise<EmployeeProfile[]> {
@@ -179,21 +185,10 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return `local-${Date.now()}`;
   }
 
-  private async ensureValidList(roomId: string): Promise<any | null> {
-    console.log('[PrivOSLifecycleService] ensureValidList called for roomId:', roomId);
-    let list = await this.findExistingList(roomId);
-    console.log('[PrivOSLifecycleService] findExistingList result:', list ? 'found' : 'not found');
-
-    if (list) {
-      list = await this.enrichListWithStagesOrDelete(list);
-    }
-
-    if (!list) {
-      console.log('[PrivOSLifecycleService] Valid list not found, creating a new one...');
-      list = await this.createNewList(roomId);
-    }
-
-    return list;
+  private async ensureValidList(roomId: string): Promise<any> {
+    const existing = await this.findExistingList(roomId);
+    if (existing) return this.enrichListWithStages(existing);
+    return this.createNewList(roomId);
   }
 
   private async findExistingList(roomId: string): Promise<any | null> {
@@ -216,25 +211,75 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return foundList;
   }
 
-  private async enrichListWithStagesOrDelete(list: any): Promise<any | null> {
-    const configItem = await this.fetchSystemConfigItem(list._id || list.id);
+  /**
+   * Attach the Kanban stage config stored on the list's system config item.
+   *
+   * This NEVER deletes the list. It used to: a failed `JSON.parse` of the config item's
+   * description, or an empty stage array, dropped the entire employee roster and provisioned a
+   * fresh empty one. `PayrollDashboard` then reconciled every payroll row against that empty
+   * roster and deleted all of them. A corrupt stage config is a config problem; it is not a
+   * reason to destroy employee records or the salary rows that hang off them.
+   */
+  private async enrichListWithStages(list: any): Promise<any> {
+    const listId = list._id || list.id;
+    const configItem = await this.fetchSystemConfigItem(listId);
 
-    if (configItem && configItem.description) {
+    // A MISSING config item is repairable and must be repaired: `createNewList` only writes one
+    // when `mcpapp.lists.create` echoes stages back, so a room can legitimately have none — and
+    // such a room is exactly the one the removed delete-and-recreate loop used to "fix", so it is
+    // a likely real-world state. Throwing here would brick it permanently. A CORRUPT item is a
+    // different case and still throws below: unreadable data must not be guessed at.
+    if (!configItem) return this.repairMissingStageConfig(list, listId);
+
+    if (configItem.description) {
       try {
         list.stages = JSON.parse(configItem.description);
-      } catch (e) {
-        console.warn('Failed to parse config item description');
+      } catch (error) {
+        throw new Error(
+          `Cấu hình Kanban của danh sách hồ sơ nhân sự (${listId}) không đọc được: ${(error as Error).message}. `
+          + 'Sửa lại item "[Hệ thống] Không xoá - Cấu hình Kanban" trong Room. Danh sách hồ sơ được giữ nguyên.'
+        );
       }
     }
 
-    if (this.isValidStagesArray(list.stages)) {
-      return list;
+    if (!this.isValidStagesArray(list.stages)) {
+      throw new Error(
+        `Danh sách hồ sơ nhân sự (${listId}) không có stage nào. `
+        + 'Khôi phục item "[Hệ thống] Không xoá - Cấu hình Kanban" trong Room. Danh sách hồ sơ được giữ nguyên.'
+      );
     }
 
-    // List is corrupted or missing stages config -> delete and return null to trigger recreation
-    console.log('[PrivOSLifecycleService] List is old/corrupted (no stages). Deleting to clean up...');
-    await this.deleteList(list._id || list.id);
-    return null;
+    return list;
+  }
+
+  /**
+   * Rebuild the stage config for a list that has no system config item at all.
+   *
+   * Stages are recovered from the list itself first, then from `mcpapp.stages.getByList`; if either
+   * yields some, the config item is written back so the next load is clean. Only a list with no
+   * stages available from ANY source throws. NOTHING is deleted on any path — that is the binding
+   * requirement this whole change exists to hold, and a re-create failure is not allowed to turn a
+   * readable roster into an outage either, so it only warns.
+   */
+  private async repairMissingStageConfig(list: any, listId: string): Promise<any> {
+    if (!this.isValidStagesArray(list.stages)) {
+      list.stages = await this.fetchListStages(listId);
+    }
+
+    if (!this.isValidStagesArray(list.stages)) {
+      throw new Error(
+        `Danh sách hồ sơ nhân sự (${listId}) không có stage nào và không khôi phục được từ đâu. `
+        + 'Khôi phục item "[Hệ thống] Không xoá - Cấu hình Kanban" trong Room. Danh sách hồ sơ được giữ nguyên.'
+      );
+    }
+
+    try {
+      await this.createSystemConfigItem(listId, list.stages);
+    } catch (error) {
+      console.warn(`[PrivOSLifecycleService] Could not re-create the Kanban config item for list ${listId}:`, error);
+    }
+
+    return list;
   }
 
   private isValidStagesArray(stages: any): boolean {
@@ -253,13 +298,6 @@ export class PrivOSLifecycleService implements ILifecycleService {
 
   private isSystemConfigItem(item: any): boolean {
     return (item.name || item.title || '').includes('[Hệ thống]');
-  }
-
-  private async deleteList(listId: string): Promise<void> {
-    await this.app.callServerTool({
-      name: 'mcpapp.lists.deleteMany',
-      arguments: { listIds: [listId] }
-    });
   }
 
   private async createNewList(roomId: string): Promise<any | null> {
@@ -319,14 +357,60 @@ export class PrivOSLifecycleService implements ILifecycleService {
     ];
   }
 
+  /**
+   * Read EVERY item of a list.
+   *
+   * This used to send a bare `count: 100` and return whatever came back. `PayrollDashboard`
+   * treats any employee missing from this roster as an orphan and deletes their payroll row, so
+   * a silently truncated read at employee 101 destroyed real salary data.
+   *
+   * `mcpapp.lists.getItems` is not documented in this repo as supporting `offset`, so rather than
+   * assume it does, every page is checked for progress: a page that yields no unseen id means the
+   * hub ignored `offset`, and that throws. Returning a partial roster is the failure mode this
+   * method exists to prevent, so it is never the fallback.
+   */
   private async fetchListItems(listId: string): Promise<any[]> {
-    const res: any = await this.app.callServerTool({
-      name: 'mcpapp.lists.getItems',
-      arguments: { listId, count: 100 }
-    });
+    const pageSize = PrivOSLifecycleService.ITEMS_PAGE_SIZE;
+    const collected: any[] = [];
+    const seenIds = new Set<string>();
 
-    const parsed: any = parseToolResult(res);
-    return Array.isArray(parsed) ? parsed : (parsed?.items || []);
+    for (let page = 0; page < PrivOSLifecycleService.ITEMS_MAX_PAGES; page += 1) {
+      const res: any = await this.app.callServerTool({
+        name: 'mcpapp.lists.getItems',
+        arguments: { listId, count: pageSize, offset: page * pageSize }
+      });
+
+      const parsed: any = parseToolResult(res);
+      const items: any[] = Array.isArray(parsed) ? parsed : (parsed?.items || []);
+
+      let fresh = 0;
+      for (const item of items) {
+        const id = typeof item?._id === 'string' ? item._id : (typeof item?.id === 'string' ? item.id : '');
+        if (!id) {
+          throw new Error(
+            `Danh sách ${listId} có item không mang _id lẫn id nên không đối chiếu được với bảng lương. Dừng để không trả về roster không an toàn.`
+          );
+        }
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+        collected.push(item);
+        fresh += 1;
+      }
+
+      if (items.length > 0 && fresh === 0) {
+        throw new Error(
+          `Không đọc hết được danh sách ${listId}: trang ${page + 1} chỉ trả về item đã thấy, `
+          + 'nghĩa là mcpapp.lists.getItems bỏ qua tham số offset. Dừng để không trả về roster thiếu.'
+        );
+      }
+
+      if (items.length < pageSize) return collected;
+    }
+
+    throw new Error(
+      `Danh sách ${listId} vượt quá ${PrivOSLifecycleService.ITEMS_MAX_PAGES * pageSize} item. `
+      + 'Dừng để không trả về roster thiếu.'
+    );
   }
 
   private createFieldDefinitionMap(fieldDefinitions: any[] | undefined): Map<string, any> {

@@ -16,6 +16,7 @@ export type HubToolTransport = typeof callAppPlatformTool;
 const SCOPE_BY_TOOL: Readonly<Record<string, string>> = {
 	'mcpapp.db.registerCollection': 'db:schema:write',
 	'mcpapp.db.getSchema': 'db:schema:read',
+	'mcpapp.db.updateSchema': 'db:schema:write',
 	'mcpapp.db.query': 'db:read',
 	'mcpapp.db.count': 'db:read',
 	'mcpapp.db.get': 'db:read',

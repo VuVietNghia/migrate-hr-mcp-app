@@ -8,6 +8,7 @@ import {
   matchesPayrollFilter,
   partitionByEmploymentStatus,
   selectEmploymentSegment,
+  selectOrphanedPayrolls,
   sumNetPayroll,
 } from '../src/ui/payroll/payroll-selectors';
 
@@ -229,5 +230,25 @@ describe('countPayrollFilters', () => {
       unconfigured: 0,
       missingInfo: 0,
     });
+  });
+});
+
+describe('selectOrphanedPayrolls', () => {
+  const employee = (id: string) => ({ _id: id, name: id, status: 'Chính thức' }) as EmployeeProfile;
+  const payroll = (id: string, employeeId: string): PayrollRecord =>
+    ({ _id: id, employeeId, baseSalary: 1, taxId: '', bankAccount: '' });
+
+  it('returns nothing when the roster is empty, however many payroll rows exist', () => {
+    expect(selectOrphanedPayrolls([], [payroll('p1', 'e1'), payroll('p2', 'e2')])).toEqual([]);
+  });
+
+  it('returns only the rows whose employee is absent from a non-empty roster', () => {
+    const result = selectOrphanedPayrolls([employee('e1')], [payroll('p1', 'e1'), payroll('p2', 'gone')]);
+    expect(result.map((row) => row._id)).toEqual(['p2']);
+  });
+
+  it('skips rows with no id, which cannot be addressed for deletion', () => {
+    const noId = { employeeId: 'gone', baseSalary: 1, taxId: '', bankAccount: '' } as PayrollRecord;
+    expect(selectOrphanedPayrolls([employee('e1')], [noId])).toEqual([]);
   });
 });

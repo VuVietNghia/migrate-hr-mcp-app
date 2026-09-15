@@ -74,12 +74,14 @@ function service(handlers: Record<string, (args: Record<string, unknown>) => unk
 describe('PayrollService', () => {
   describe('initializeSchema', () => {
     it('registers the room-scoped collection with the unique (roomId, employeeId) index', async () => {
-      const { svc, calls } = service({ 'mcpapp.db.registerCollection': () => ({ ok: true }) });
+      const { svc, calls } = service({
+        'mcpapp.db.registerCollection': () => ({ ok: true }),
+        'mcpapp.db.updateSchema': () => ({ ok: true }),
+      });
       await svc.initializeSchema();
 
-      expect(calls).toHaveLength(1);
-      expect(calls[0].name).toBe('mcpapp.db.registerCollection');
-      const args = calls[0].arguments!;
+      const register = calls.find((call) => call.name === 'mcpapp.db.registerCollection')!;
+      const args = register.arguments!;
       expect(args.collection).toBe(PAYROLL_COLLECTION);
       expect(args.scope).toBe('room');
       expect(args.indexes).toEqual([{ fields: { roomId: 1, employeeId: 1 }, unique: true }]);
@@ -87,11 +89,26 @@ describe('PayrollService', () => {
       expect(fields.find((f) => f.name === 'roomId')?.required).toBe(true);
       expect(fields.find((f) => f.name === 'employeeId')?.required).toBe(true);
       expect(fields.find((f) => f.name === 'baseSalary')?.required).toBe(true);
+      expect(fields.some((f) => f.name === 'deletedAt')).toBe(true);
+    });
+
+    it('migrates an already-registered room by adding the new field list', async () => {
+      const { svc, calls } = service({
+        'mcpapp.db.registerCollection': () => toolError('Collection already registered'),
+        'mcpapp.db.updateSchema': () => ({ ok: true }),
+      });
+      await svc.initializeSchema();
+
+      const update = calls.find((call) => call.name === 'mcpapp.db.updateSchema')!;
+      expect(update).toBeDefined();
+      const fields = update.arguments!.fields as Array<{ name: string }>;
+      expect(fields.some((f) => f.name === 'deletedAt')).toBe(true);
     });
 
     it('treats "already registered" as success', async () => {
       const { svc } = service({
         'mcpapp.db.registerCollection': () => toolError('Collection already registered'),
+        'mcpapp.db.updateSchema': () => ({ ok: true }),
       });
       await expect(svc.initializeSchema()).resolves.toBeUndefined();
     });
@@ -146,14 +163,19 @@ describe('PayrollService', () => {
       ]);
     });
 
-    it('stops at PAYROLL_MAX_PAGES instead of paging forever', async () => {
+    it('throws instead of returning a truncated list when the page budget runs out', async () => {
       const pages = Array.from({ length: PAYROLL_MAX_PAGES + 5 }, (_, i) =>
         fullPage(PAYROLL_PAGE_SIZE, `p${i}`),
       );
       const { svc, calls } = service(pagingHandlers(pages));
 
-      expect(await svc.getRecords()).toHaveLength(PAYROLL_PAGE_SIZE * PAYROLL_MAX_PAGES);
+      await expect(svc.getRecords()).rejects.toThrow(/vượt quá/i);
       expect(calls).toHaveLength(PAYROLL_MAX_PAGES);
+    });
+
+    it('does not throw when the read ends on a short page inside the budget', async () => {
+      const { svc } = service(pagingHandlers([fullPage(PAYROLL_PAGE_SIZE, 'p0'), fullPage(1, 'p1')]));
+      expect(await svc.getRecords()).toHaveLength(PAYROLL_PAGE_SIZE + 1);
     });
 
     it('returns records newest first regardless of the order the hub sent them', async () => {
@@ -175,11 +197,27 @@ describe('PayrollService', () => {
       const { svc } = service({ 'mcpapp.db.query': () => toolError('Insufficient scope') });
       await expect(svc.getRecords()).rejects.toThrow(/insufficient scope/i);
     });
+
+    it('hides tombstoned rows', async () => {
+      const { svc } = service(
+        pagingHandlers([
+          [
+            { _id: 'live', roomId: 'room-1', employeeId: 'a', baseSalary: 1 },
+            { _id: 'dead', roomId: 'room-1', employeeId: 'b', baseSalary: 1, deletedAt: '2026-09-15T00:00:00.000Z' },
+          ],
+        ]),
+      );
+
+      expect((await svc.getRecords()).map((row) => row._id)).toEqual(['live']);
+    });
   });
 
   describe('saveRecord', () => {
     it('creates with roomId stamped from the service, never from the record', async () => {
-      const { svc, calls } = service({ 'mcpapp.db.create': () => ({ _id: 'new' }) });
+      const { svc, calls } = service({
+        'mcpapp.db.query': () => ({ records: [] }),
+        'mcpapp.db.create': () => ({ _id: 'new' }),
+      });
       await svc.saveRecord({
         employeeId: 'e1',
         baseSalary: 5,
@@ -188,15 +226,18 @@ describe('PayrollService', () => {
         ...({ roomId: 'room-EVIL' } as object),
       } as PayrollRecord);
 
-      expect(calls[0].name).toBe('mcpapp.db.create');
-      expect(calls[0].arguments).toEqual({
+      expect(calls.map((call) => call.name)).toEqual(['mcpapp.db.query', 'mcpapp.db.create']);
+      expect(calls[1].arguments).toEqual({
         collection: PAYROLL_COLLECTION,
         data: { employeeId: 'e1', baseSalary: 5, taxId: 't', bankAccount: 'b', roomId: 'room-1' },
       });
     });
 
-    it('never sends hub-assigned timestamps back on a write', async () => {
-      const { svc, calls } = service({ 'mcpapp.db.create': () => ({ _id: 'new' }) });
+    it('never sends hub-assigned timestamps or a tombstone back on a write', async () => {
+      const { svc, calls } = service({
+        'mcpapp.db.query': () => ({ records: [] }),
+        'mcpapp.db.create': () => ({ _id: 'new' }),
+      });
       await svc.saveRecord({
         employeeId: 'e1',
         baseSalary: 5,
@@ -204,15 +245,34 @@ describe('PayrollService', () => {
         bankAccount: '',
         _createdAt: '2026-01-01T00:00:00.000Z',
         _updatedAt: '2026-01-02T00:00:00.000Z',
+        deletedAt: '2026-01-03T00:00:00.000Z',
       });
 
-      const data = calls[0].arguments!.data as Record<string, unknown>;
+      const data = calls[1].arguments!.data as Record<string, unknown>;
       expect(data).not.toHaveProperty('_createdAt');
       expect(data).not.toHaveProperty('_updatedAt');
       expect(data).not.toHaveProperty('_id');
+      expect(data).not.toHaveProperty('deletedAt');
     });
 
-    it('updates by id and re-pins roomId in the payload', async () => {
+    it('revives a tombstoned row instead of creating a duplicate the unique index would reject', async () => {
+      const { svc, calls } = service({
+        'mcpapp.db.query': () => ({
+          records: [{ _id: 'tomb-1', roomId: 'room-1', employeeId: 'e1', baseSalary: 1, deletedAt: '2026-09-01T00:00:00.000Z' }],
+        }),
+        'mcpapp.db.update': () => ({ ok: true }),
+      });
+      await svc.saveRecord({ employeeId: 'e1', baseSalary: 7, taxId: '', bankAccount: '' });
+
+      expect(calls.some((call) => call.name === 'mcpapp.db.create')).toBe(false);
+      const update = calls.find((call) => call.name === 'mcpapp.db.update')!;
+      expect(update.arguments!.id).toBe('tomb-1');
+      const data = update.arguments!.data as Record<string, unknown>;
+      expect(data.baseSalary).toBe(7);
+      expect(data.deletedAt).toBe('');
+    });
+
+    it('updates by id, re-pins roomId and clears any tombstone in the payload', async () => {
       const { svc, calls } = service({ 'mcpapp.db.update': () => ({ ok: true }) });
       await svc.saveRecord({ _id: 'id-1', employeeId: 'e1', baseSalary: 9, taxId: '', bankAccount: '' });
 
@@ -220,12 +280,33 @@ describe('PayrollService', () => {
       expect(calls[0].arguments).toEqual({
         collection: PAYROLL_COLLECTION,
         id: 'id-1',
-        data: { employeeId: 'e1', baseSalary: 9, taxId: '', bankAccount: '', roomId: 'room-1' },
+        // Without `deletedAt: ''` a save made while the row was tombstoned by a GC pass elsewhere
+        // reports "thành công" and then vanishes from the table.
+        data: { employeeId: 'e1', baseSalary: 9, taxId: '', bankAccount: '', roomId: 'room-1', deletedAt: '' },
       });
     });
 
+    it('never overwrites a LIVE row — the unique index must reject the duplicate', async () => {
+      const { svc, calls } = service({
+        'mcpapp.db.query': () => ({
+          records: [{ _id: 'live-1', roomId: 'room-1', employeeId: 'e1', baseSalary: 30000000 }],
+        }),
+        'mcpapp.db.create': () => toolError('E11000 duplicate key error'),
+      });
+
+      await expect(
+        svc.saveRecord({ employeeId: 'e1', baseSalary: 8000000, taxId: '', bankAccount: '' }),
+      ).rejects.toThrow(/duplicate key/i);
+
+      expect(calls.some((call) => call.name === 'mcpapp.db.update')).toBe(false);
+      expect(calls.map((call) => call.name)).toEqual(['mcpapp.db.query', 'mcpapp.db.create']);
+    });
+
     it('rejects a tool-level write failure instead of reporting success', async () => {
-      const { svc } = service({ 'mcpapp.db.create': () => toolError('Validation failed') });
+      const { svc } = service({
+        'mcpapp.db.query': () => ({ records: [] }),
+        'mcpapp.db.create': () => toolError('Validation failed'),
+      });
       await expect(
         svc.saveRecord({ employeeId: 'e1', baseSalary: 5, taxId: '', bankAccount: '' }),
       ).rejects.toThrow(/validation failed/i);
@@ -233,16 +314,21 @@ describe('PayrollService', () => {
   });
 
   describe('deleteRecord', () => {
-    it('deletes by id', async () => {
-      const { svc, calls } = service({ 'mcpapp.db.delete': () => ({ ok: true }) });
+    it('writes a deletedAt tombstone and never calls mcpapp.db.delete', async () => {
+      const { svc, calls } = service({ 'mcpapp.db.update': () => ({ ok: true }) });
       await svc.deleteRecord('id-1');
 
-      expect(calls[0].name).toBe('mcpapp.db.delete');
-      expect(calls[0].arguments).toEqual({ collection: PAYROLL_COLLECTION, id: 'id-1' });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].name).toBe('mcpapp.db.update');
+      expect(calls[0].arguments!.collection).toBe(PAYROLL_COLLECTION);
+      expect(calls[0].arguments!.id).toBe('id-1');
+      const data = calls[0].arguments!.data as Record<string, unknown>;
+      expect(data.roomId).toBe('room-1');
+      expect(Number.isNaN(Date.parse(data.deletedAt as string))).toBe(false);
     });
 
     it('rejects a tool-level delete failure', async () => {
-      const { svc } = service({ 'mcpapp.db.delete': () => toolError('Not found') });
+      const { svc } = service({ 'mcpapp.db.update': () => toolError('Not found') });
       await expect(svc.deleteRecord('id-1')).rejects.toThrow(/not found/i);
     });
   });

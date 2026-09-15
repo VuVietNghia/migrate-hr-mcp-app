@@ -148,3 +148,21 @@ export function countPayrollFilters(
     return counts;
   }, { all: 0, configured: 0, unconfigured: 0, missingInfo: 0 });
 }
+
+/**
+ * The payroll rows whose employee is no longer on the roster — the garbage-collection candidates.
+ *
+ * Returns nothing when the roster is empty. An empty roster means the lifecycle read failed or the
+ * room was just provisioned, never that every employee left at once, and treating it as ground
+ * truth is what let a single bad read wipe an entire room's salary data. Rows with no `_id` are
+ * skipped because there is nothing to address a deletion to.
+ */
+export function selectOrphanedPayrolls(
+  employees: readonly EmployeeProfile[],
+  payrolls: readonly PayrollRecord[],
+): PayrollRecord[] {
+  if (employees.length === 0) return [];
+
+  const knownEmployeeIds = new Set(employees.map((employee) => employee._id));
+  return payrolls.filter((payroll) => Boolean(payroll._id) && !knownEmployeeIds.has(payroll.employeeId));
+}
