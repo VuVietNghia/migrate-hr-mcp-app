@@ -35,6 +35,15 @@ function fakeRepo(): IPayrollRepository & { calls: unknown[] } {
   } as unknown as IPayrollRepository & { calls: unknown[] };
 }
 
+/**
+ * Every payroll tool now self-migrates the schema before the switch, so `['init', roomId]` leads
+ * each tool's recorded calls. Assertions about the operation itself filter that noise out; the
+ * init call has its own dedicated tests below.
+ */
+function ops(repo: { calls: unknown[] }): unknown[] {
+  return repo.calls.filter((call) => (call as unknown[])[0] !== 'init');
+}
+
 describe('hrm.payroll.* tools', () => {
   let repo: ReturnType<typeof fakeRepo>;
   beforeEach(() => {
@@ -75,7 +84,7 @@ describe('hrm.payroll.* tools', () => {
       { data: { employeeId: 'e1', baseSalary: 10, taxId: 'T', roomId: 'room-EVIL', $where: 'x' } },
       actor,
     );
-    expect(repo.calls).toEqual([['create', 'room-1', { employeeId: 'e1', baseSalary: 10, taxId: 'T' }]]);
+    expect(ops(repo)).toEqual([['create', 'room-1', { employeeId: 'e1', baseSalary: 10, taxId: 'T' }]]);
     expect(JSON.parse(ok.content[0].text)._id).toBe('n');
   });
 
@@ -88,12 +97,36 @@ describe('hrm.payroll.* tools', () => {
       { id: 'x1', data: { baseSalary: 2, bankName: 'B', roomId: 'room-EVIL' } },
       actor,
     );
-    expect(repo.calls).toEqual([['update', 'room-1', 'x1', { baseSalary: 2, bankName: 'B' }]]);
+    expect(ops(repo)).toEqual([['update', 'room-1', 'x1', { baseSalary: 2, bankName: 'B' }]]);
   });
 
   it('delete requires id', async () => {
     await expect(handlePayrollTool('hrm.payroll.delete', {}, actor)).rejects.toThrow('id is required');
     await handlePayrollTool('hrm.payroll.delete', { id: 'x1' }, actor);
-    expect(repo.calls).toEqual([['delete', 'room-1', 'x1']]);
+    expect(ops(repo)).toEqual([['delete', 'room-1', 'x1']]);
+  });
+
+  it('initializes the schema for create/update/delete too, not only query', async () => {
+    // A room whose Payroll tab has not been opened since the `deletedAt` release still enforces the
+    // old field list, and the hub rejects a write carrying an unregistered field — so a delete there
+    // fails unless every tool migrates first.
+    await handlePayrollTool('hrm.payroll.delete', { id: 'x1' }, actor);
+    expect(repo.calls).toEqual([
+      ['init', 'room-1'],
+      ['delete', 'room-1', 'x1'],
+    ]);
+
+    repo.calls.length = 0;
+    await handlePayrollTool('hrm.payroll.create', { data: { employeeId: 'e1', baseSalary: 1 } }, actor);
+    expect((repo.calls[0] as unknown[])[0]).toBe('init');
+
+    repo.calls.length = 0;
+    await handlePayrollTool('hrm.payroll.update', { id: 'x1', data: { baseSalary: 2 } }, actor);
+    expect((repo.calls[0] as unknown[])[0]).toBe('init');
+  });
+
+  it('initializes the schema exactly once per call', async () => {
+    await handlePayrollTool('hrm.payroll.query', {}, actor);
+    expect(repo.calls.filter((call) => (call as unknown[])[0] === 'init')).toHaveLength(1);
   });
 });

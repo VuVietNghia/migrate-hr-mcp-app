@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import type { McpApp } from '@privos_ai/app-react';
 import { hasPayrollOwnerRole } from './owner-role-policy';
 import { isPayrollOwnerFromContextResult } from './payroll-access-context';
+import { usePolling } from '../../hooks/usePolling';
+
+const PAYROLL_ACCESS_POLL_INTERVAL_MS = 30000;
 
 type PayrollAccessApp = Pick<McpApp, 'callServerTool'>;
 
@@ -37,13 +40,15 @@ export function usePayrollAccessPolling(
   }, [app]);
 
   // Runs app-wide, not per tab: this poll decides whether the Payroll tab is shown at all.
-  // Disabled: the 5s interval was spamming the network tab with mcpapp.context.get. Kept as a
-  // single mount-time check instead — a mid-session role change now requires a reload to reflect.
-  // usePolling(refreshAccess, {
-  //   enabled: app !== null,
-  //   interval: 5000,
-  //   immediate: true,
-  // });
+  // A prior 5s interval spammed the network tab with mcpapp.context.get; 30s still catches a
+  // mid-session owner-role revocation within a session without that volume. `immediate: false`
+  // because the mount-time effect below already covers the first check.
+  usePolling(refreshAccess, {
+    enabled: app !== null,
+    interval: PAYROLL_ACCESS_POLL_INTERVAL_MS,
+    immediate: false,
+  });
+
   useEffect(() => {
     if (app !== null) void refreshAccess();
   }, [app, refreshAccess]);

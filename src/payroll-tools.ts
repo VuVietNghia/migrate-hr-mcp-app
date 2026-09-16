@@ -174,9 +174,15 @@ export async function handlePayrollTool(name: PayrollToolName, rawArgs: unknown,
 		const roomId = resolveActorRoom(args, actor);
 		const { repository } = dependencies;
 
+		// EVERY payroll tool self-migrates, not just `query`. `delete` writes the `deletedAt` field and
+		// the hub rejects a write carrying a field the room's registered schema does not declare, so in
+		// a room whose Payroll tab has not been opened since this release a soft delete would fail. This
+		// is a no-op once the room is current; it stays inside the try/catch so a failure is logged with
+		// the tool name rather than surfacing as a bare -32603.
+		await repository.initializeSchema(roomId);
+
 		switch (name) {
 			case 'hrm.payroll.query': {
-				await repository.initializeSchema(roomId);
 				return wrap({ records: await repository.queryByRoom(roomId) });
 			}
 			case 'hrm.payroll.create': {

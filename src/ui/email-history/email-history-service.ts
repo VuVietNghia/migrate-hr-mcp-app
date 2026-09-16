@@ -9,6 +9,18 @@ import {
 } from '../../services/mail/email-history-model';
 import { restCall } from '../privos-rest';
 import { UserSessionTrackedMail } from './user-session-tracked-mail';
+import { fetchAllListItems } from '../list-item-paging';
+
+/**
+ * 100 × 100 = 10.000 bản ghi, cùng trần với roster nhân sự. Trước đây chỗ này gửi `count: 1000`
+ * một phát, nhưng Hub chặn `count` ở 100 (`tools_lists.md:270`) và không báo lỗi khi vượt — hộp
+ * thư quá 100 email đang mất phần dư trong im lặng.
+ *
+ * Trần đặt cao vì vượt trần là ném lỗi, tức tab Email trống trơn. Với một hộp thư chỉ để đọc,
+ * trống trơn còn tệ hơn hiển thị thiếu, nên trần phải nằm ngoài mọi room hợp lý; nó chỉ còn là
+ * lưới chặn vòng lặp vô hạn khi list hỏng.
+ */
+const EMAIL_HISTORY_MAX_PAGES = 100;
 
 type EmailHistoryApp = Pick<McpApp, 'callServerTool' | 'rest'>;
 
@@ -69,12 +81,10 @@ export class EmailHistoryService {
     }
     if (!stageIds) throw new Error('List lịch sử email thiếu cấu hình trạng thái.');
 
-    const itemsResponse = parseToolResponse(await this.app.callServerTool({
-      name: 'mcpapp.lists.getItems',
-      arguments: { listId, count: 1000 },
-    }));
-    const items = Array.isArray(itemsResponse) ? itemsResponse : itemsResponse?.items;
-    if (!Array.isArray(items)) return [];
+    const items = await fetchAllListItems(this.app, listId, {
+      missingId: 'skip',
+      maxPages: EMAIL_HISTORY_MAX_PAGES,
+    });
 
     return items
       .map(item => parseEmailHistoryItem({ ...item, listId }, stageIds!))

@@ -9,6 +9,7 @@ import { canShowInviteMailButton, getCVColumnLabel, getCVColumnsForStages, getIn
 import { restCall } from '../privos-rest';
 import { usePolling } from '../hooks/usePolling';
 import { CVBoardPollingGuard } from './polling-sync';
+import { fetchScreeningListItems, readBoardStatuses } from './cv-list-reader';
 import { buildTrackedInviteEmailRequest } from './invite-email-request';
 import { UserSessionTrackedMail } from '../email-history/user-session-tracked-mail';
 import { createInterviewEmailTemplateRepository } from '../email-templates/interview-email-template-default';
@@ -641,13 +642,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
           console.error("Failed to fetch full list details for stages", err);
         }
 
-        const itemsRes: any = await app.callServerTool({
-          name: 'mcpapp.lists.getItems',
-          arguments: { listId: lId }
-        });
-        const itemsParsed = JSON.parse(itemsRes?.content?.[0]?.text || '[]');
-        let items = Array.isArray(itemsParsed) ? itemsParsed : (itemsParsed.items || []);
-        items = items.filter((item: any) => !(item.name || item.title || '').includes('[Hệ thống] Không xoá'));
+        const items = await fetchScreeningListItems(app, lId);
 
         const loadedCvs: CVProfile[] = items.map((item: any) => {
           let score, category, reason, email, sdt;
@@ -761,22 +756,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
 
     try {
       const snapshots = await Promise.all(boards.map(async (board) => {
-        const itemsRes: any = await app.callServerTool({
-          name: 'mcpapp.lists.getItems',
-          arguments: { listId: board.listId }
-        });
-        const parsed = JSON.parse(itemsRes?.content?.[0]?.text || '[]');
-        const items = Array.isArray(parsed) ? parsed : (parsed.items || []);
-        const statuses = new Map<string, string>();
-
-        for (const item of items) {
-          const itemId = item._id || item.id;
-          const status = board.stagesMap[item.stageId]
-            || (typeof item.stage === 'string' ? item.stage : undefined)
-            || (typeof item.status === 'string' ? item.status : undefined);
-          if (itemId && status) statuses.set(itemId, status);
-        }
-
+        const statuses = await readBoardStatuses(app, board.listId, board.stagesMap);
         return { listId: board.listId, statuses };
       }));
 

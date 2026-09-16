@@ -15,8 +15,20 @@ interface QueueItem<T> {
 }
 
 /**
+ * Thrown into every task still queued when `clear()` runs. Before this existed `clear()` dropped
+ * the items without settling their promises, so every caller sitting on `await enqueue(...)`
+ * waited forever — no resolve, no reject, no timeout.
+ */
+export class TaskQueueClearedError extends Error {
+  constructor() {
+    super('Tác vụ bị huỷ vì hàng đợi đã được xoá.');
+    this.name = 'TaskQueueClearedError';
+  }
+}
+
+/**
  * Hàng đợi xử lý tác vụ bất đồng bộ (In-memory Queue)
- * 
+ *
  * - Đảm bảo các tác vụ được thực thi tuần tự (Sequential).
  * - Tránh hiện tượng Spam/Rate Limit bằng cách duy trì thời gian trễ (delayMs) giữa các lần gọi.
  * - Chuẩn Clean Code: Single Responsibility (Chỉ làm nhiệm vụ xếp hàng và chạy).
@@ -82,9 +94,13 @@ export class TaskQueue {
   }
 
   /**
-   * Xóa toàn bộ tác vụ đang chờ
+   * Xoá toàn bộ tác vụ đang chờ. Task đang chạy dở không bị ảnh hưởng — nó đã rời hàng đợi.
    */
   public clear(): void {
+    const dropped = this.queue;
     this.queue = [];
+    for (const item of dropped) {
+      item.reject(new TaskQueueClearedError());
+    }
   }
 }

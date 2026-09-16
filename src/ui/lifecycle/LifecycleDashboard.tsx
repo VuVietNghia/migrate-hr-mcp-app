@@ -90,7 +90,11 @@ function LifecycleContent({ active }: { active: boolean }) {
     } catch (error) {
       console.error('[LifecycleDashboard] Error loading profiles:', error);
       if (!isSilent) {
-        setStatusMsg({ text: 'Không thể tải danh sách hồ sơ nhân sự.', type: 'error' });
+        // Surface the real reason the way `PayrollDashboard` does. `PrivOSLifecycleService` throws
+        // actionable text (restore the "[Hệ thống] Không xoá - Cấu hình Kanban" item, the roster is
+        // intact); the generic message left that instruction reachable only from the console.
+        const detail = error instanceof Error ? error.message : String(error);
+        setStatusMsg({ text: `Không thể tải danh sách hồ sơ nhân sự: ${detail}`, type: 'error' });
       }
     } finally {
       isRefreshingProfilesRef.current = false;

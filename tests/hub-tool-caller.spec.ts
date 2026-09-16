@@ -26,6 +26,10 @@ describe('resolveRequiredScope', () => {
   it('throws on a tool outside the allowlist', () => {
     expect(() => resolveRequiredScope('mcpapp.files.delete')).toThrow('not allowed from the server');
   });
+
+  it('allows mcpapp.db.updateSchema under db:schema:write', () => {
+    expect(resolveRequiredScope('mcpapp.db.updateSchema')).toBe('db:schema:write');
+  });
 });
 
 describe('createRoomHubToolCaller', () => {
