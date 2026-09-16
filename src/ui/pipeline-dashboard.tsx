@@ -1,12 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { DeleteOutlined, LoadingOutlined } from '@ant-design/icons';
 import { PipelineService, CVFile, ProcessingStatus } from './pipeline-service';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
 import { getCvPipelineDisplayReason } from './cv-pipeline-display-reason';
 import { createOrUpdateFile, describeFeatureError, readRoomFileText } from './privos-rest';
+import { readParsedDocumentText } from './parsed-cv-text';
 import { usePolling } from './hooks/usePolling';
 
 type JdLoadStatus = 'idle' | 'loading' | 'success' | 'error';
+
+/**
+ * JD formats whose text only exists in the Hub parser output. `file-management.files/{id}/content`
+ * wraps the payload in a JSON string, so these come back as mangled binary instead of an error —
+ * scoring against that garbage is worse than refusing to load it.
+ */
+const JD_NEEDS_PARSER = /\.(pdf|docx?|rtf|odt)$/i;
+
+/** Where JDs live, so the parser artefact is looked for under the matching `.markdown` branch. */
+const JD_SOURCE_FOLDER = ['hr-miniapp', 'jds'];
 
 // Dependency Injection Interface
 // Swap implementation easily in the future (e.g. mock for testing)
@@ -14,6 +26,7 @@ export interface IPipelineService {
   fetchAvailableFiles(): Promise<CVFile[]>;
   uploadCV(file: File): Promise<CVFile>;
   uploadJD?(file: File): Promise<CVFile>;
+  deleteFile?(fileId: string): Promise<void>;
   processCV(
     cv: CVFile,
     updateStatus: (s: Partial<ProcessingStatus>) => void,
@@ -442,6 +455,9 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
 
   const [files, setFiles] = useState<CVFile[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteArmTimerRef = useRef<number | null>(null);
   const [statuses, setStatuses] = useState<Record<string, ProcessingStatus>>({});
   const [activeBatchFileIds, setActiveBatchFileIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -482,9 +498,13 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
     try {
       const baseName = name.split('/').pop()?.split('\\').pop() || name;
       const targetFile = availableJDs.find(f => f.name === name || f.name === baseName || (fileId && f._id === fileId));
+      const resolvedId = fileId || targetFile?._id;
+      const viaParser = JD_NEEDS_PARSER.test(targetFile?.name || baseName) && Boolean(resolvedId) && Boolean(roomId);
       let text = '';
       try {
-        text = await readRoomFileText(app, { _id: fileId || targetFile?._id, downloadUrl: targetFile?.downloadUrl });
+        text = viaParser
+          ? await readParsedDocumentText(app, roomId, { _id: resolvedId as string, name: targetFile?.name || baseName }, 'JD', JD_SOURCE_FOLDER)
+          : await readRoomFileText(app, { _id: resolvedId, downloadUrl: targetFile?.downloadUrl });
       } catch (e) {
         lastError = e;
       }
@@ -624,6 +644,7 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      if (deleteArmTimerRef.current) window.clearTimeout(deleteArmTimerRef.current);
     };
   }, []);
 
@@ -679,6 +700,43 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
   const handleToggleSelect = (id: string) => {
     setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
+
+  /**
+   * Arms the delete for one row. This mini-app runs in a sandboxed iframe on an opaque origin,
+   * where `confirm()` is swallowed and returns false, so a blocking dialog would make the button
+   * dead rather than safe. A second click inside the window confirms, and the window disarms
+   * itself so a stray first click cannot sit armed waiting for an unrelated one.
+   */
+  const armDeleteCV = useCallback((fileId: string) => {
+    if (deleteArmTimerRef.current) window.clearTimeout(deleteArmTimerRef.current);
+    setPendingDeleteId(fileId);
+    deleteArmTimerRef.current = window.setTimeout(() => setPendingDeleteId(null), 4000);
+  }, []);
+
+  const handleDeleteCV = useCallback(async (file: CVFile) => {
+    const service = serviceRef.current;
+    if (!service || processing || deletingId) return;
+    if (deleteArmTimerRef.current) window.clearTimeout(deleteArmTimerRef.current);
+    setPendingDeleteId(null);
+    if (!service.deleteFile) {
+      showToast('B\u1ea3n d\u1ecbch v\u1ee5 n\u00e0y kh\u00f4ng h\u1ed7 tr\u1ee3 x\u00f3a file.', 'error');
+      return;
+    }
+    setDeletingId(file._id);
+    try {
+      await service.deleteFile(file._id);
+      setFiles(previous => previous.filter(item => item._id !== file._id));
+      setSelectedIds(previous => { const next = new Set(previous); next.delete(file._id); return next; });
+      addLog(`\u0110\u00e3 x\u00f3a CV kh\u1ecfi Room Files: ${file.name}`);
+      showToast(`\u0110\u00e3 x\u00f3a "${file.name}"`);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      addLog(`[L\u1ed6I] Kh\u00f4ng x\u00f3a \u0111\u01b0\u1ee3c ${file.name}: ${reason}`);
+      showToast(`Kh\u00f4ng x\u00f3a \u0111\u01b0\u1ee3c "${file.name}": ${reason}`, 'error');
+    } finally {
+      setDeletingId(null);
+    }
+  }, [addLog, deletingId, processing, showToast]);
 
   const handleUploadCV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = e.target.files;
@@ -1202,6 +1260,19 @@ REQUIRED:
         .pl-check { width: 14px; height: 14px; flex-shrink: 0; border: 1.5px solid var(--border); border-radius: 3px; transition: background 0.15s, border-color 0.15s; }
         .pl-file-item.sel .pl-check { background: var(--accent); border-color: var(--accent); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6l3 3 5-5' stroke='white' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-size: 10px; background-position: center; background-repeat: no-repeat; }
 
+        .pl-file-del {
+          flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+          min-width: 24px; height: 24px; padding: 0 6px;
+          border: 1px solid transparent; border-radius: var(--radius-sm);
+          background: transparent; color: var(--text-muted);
+          font-size: 14px; line-height: 1; cursor: pointer; opacity: .75;
+          transition: opacity .15s, background .15s, color .15s, border-color .15s;
+        }
+        .pl-file-item:hover .pl-file-del { opacity: 1; }
+        .pl-file-del:hover:not(:disabled) { background: rgba(220,38,38,.1); color: #dc2626; border-color: rgba(220,38,38,.35); }
+        .pl-file-del:disabled { cursor: not-allowed; opacity: .3; }
+        .pl-file-del.confirm { opacity: 1; background: rgba(220,38,38,.12); color: #dc2626; border-color: rgba(220,38,38,.45); font-size: 11px; font-weight: 600; }
+
         @keyframes pl-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pl-modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes pl-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
@@ -1341,7 +1412,7 @@ REQUIRED:
               {/* JD Upload Fallback */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '12px', borderTop: '1px dashed var(--border-light)', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{'Ho\u1eb7c t\u1ea3i file t\u1eeb m\u00e1y t\u00ednh:'}</span>
-                <input type="file" id="jd-upload" style={{ display: 'none' }} onChange={handleUploadJD} accept=".md,.txt" />
+                <input type="file" id="jd-upload" style={{ display: 'none' }} onChange={handleUploadJD} accept=".md,.txt,.pdf,.doc,.docx" />
                 <button className="pl-btn" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => document.getElementById('jd-upload')?.click()} disabled={processing}>
                   {'\u2191 Upload'}
                 </button>
@@ -1372,6 +1443,22 @@ REQUIRED:
                             onClick={() => !processing && handleToggleSelect(f._id)} title={f.name}>
                             <span className="pl-check" />
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{f.name}</span>
+                            <button
+                              type="button"
+                              className={`pl-file-del${pendingDeleteId === f._id ? ' confirm' : ''}`}
+                              disabled={processing || deletingId !== null}
+                              title={pendingDeleteId === f._id
+                                ? `B\u1ea5m l\u1ea7n n\u1eefa \u0111\u1ec3 x\u00f3a "${f.name}" kh\u1ecfi Room Files`
+                                : `X\u00f3a "${f.name}" kh\u1ecfi Room Files`}
+                              aria-label={pendingDeleteId === f._id ? `X\u00e1c nh\u1eadn x\u00f3a ${f.name}` : `X\u00f3a ${f.name}`}
+                              onClick={event => {
+                                event.stopPropagation();
+                                if (pendingDeleteId === f._id) void handleDeleteCV(f);
+                                else armDeleteCV(f._id);
+                              }}
+                            >
+                              {deletingId === f._id ? <LoadingOutlined /> : pendingDeleteId === f._id ? 'X\u00f3a?' : <DeleteOutlined />}
+                            </button>
                           </div>
                         ))
                     }

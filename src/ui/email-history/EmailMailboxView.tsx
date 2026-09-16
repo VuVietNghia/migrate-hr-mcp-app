@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowLeftOutlined,
   CalendarOutlined,
@@ -28,7 +28,7 @@ import type { IInterviewEmailTemplateRepository } from '../email-templates/inter
 import {
   canCreateEmailTemplate,
   getEmailMailboxContentMode,
-  getTemplateCategory,
+  isTemplateCategoryVisible,
   type EmailTemplateCategory,
 } from '../email-templates/interview-email-template-state';
 
@@ -44,6 +44,8 @@ export interface EmailMailboxViewProps {
   selectedId: string | null;
   filter: EmailHistoryFilter;
   sourceFilter: EmailSourceFilter;
+  /** The template list's own Phỏng vấn / Nhân sự toggle; "all" (nothing picked) shows both lists. */
+  templateFilter: EmailSourceFilter;
   query: string;
   dateRange: EmailHistoryDateRange;
   active: boolean;
@@ -62,6 +64,7 @@ export interface EmailMailboxViewProps {
   onBack: () => void;
   onFilterChange: (filter: EmailHistoryFilter) => void;
   onSourceFilterChange: (source: EmailSource) => void;
+  onTemplateFilterChange: (source: EmailSource) => void;
   onCreateTemplate: (category: EmailTemplateCategory) => void;
   onQueryChange: (query: string) => void;
   onDateRangeChange: (dateRange: EmailHistoryDateRange) => void;
@@ -186,6 +189,7 @@ export function EmailMailboxView({
   selectedId,
   filter,
   sourceFilter,
+  templateFilter,
   query,
   dateRange,
   active,
@@ -203,6 +207,7 @@ export function EmailMailboxView({
   onBack,
   onFilterChange,
   onSourceFilterChange,
+  onTemplateFilterChange,
   onCreateTemplate,
   onQueryChange,
   onDateRangeChange,
@@ -215,26 +220,44 @@ export function EmailMailboxView({
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
   const [draftDateRange, setDraftDateRange] = useState<EmailHistoryDateRange>(dateRange);
   const [dateFilterError, setDateFilterError] = useState<string | null>(null);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<EmailTemplateCategory | null>(null);
   const isTemplateMode = filter === 'templates';
   const sourceRecords = sourceFilter === 'all'
     ? records
     : records.filter(record => record.source === sourceFilter);
   const visibleRecords = isTemplateMode ? [] : filterEmailHistory(records, filter, query, dateRange, sourceFilter);
   const selected = records.find(record => record.id === selectedId) || null;
-  const contentMode = getEmailMailboxContentMode(filter, sourceFilter, Boolean(templateRepositories));
-  const templateCategory = getTemplateCategory(sourceFilter);
+  const contentMode = getEmailMailboxContentMode(filter, templateFilter, Boolean(templateRepositories));
+  const showsTemplates = contentMode === 'all-templates'
+    || contentMode === 'interview-templates'
+    || contentMode === 'employee-templates';
   const counts = {
     all: sourceRecords.length,
     sent: sourceRecords.filter(record => record.status === 'sent').length,
     failed: sourceRecords.filter(record => record.status === 'failed').length,
-    templates: sourceFilter === 'all'
+    templates: templateFilter === 'all'
       ? templateCounts.cv_scored + templateCounts.lifecycle
-      : templateCounts[templateCategory],
+      : templateCounts[templateFilter],
   };
-  const templatePanels: Array<{ category: EmailTemplateCategory; mode: typeof contentMode }> = [
-    { category: 'cv_scored', mode: 'interview-templates' },
-    { category: 'lifecycle', mode: 'employee-templates' },
+  const templatePanels: Array<{ category: EmailTemplateCategory; label: string }> = [
+    { category: 'cv_scored', label: 'Mẫu phỏng vấn' },
+    { category: 'lifecycle', label: 'Mẫu nhân sự' },
   ];
+  const canCreateCategory = (category: EmailTemplateCategory) => showsTemplates
+    && isTemplateCategoryVisible(templateFilter, category)
+    && canCreateEmailTemplate(active, Boolean(templateRepositories), templateReady[category]);
+  const createTemplate = (category: EmailTemplateCategory) => {
+    setCreateMenuOpen(false);
+    onCreateTemplate(category);
+  };
+  // With both lists on screen, an open detail/create form in one hides the other list.
+  const editingCallbacks = useMemo<ByTemplateCategory<(editing: boolean) => void>>(() => {
+    const track = (category: EmailTemplateCategory) => (editing: boolean) => {
+      setEditingCategory(current => editing ? category : current === category ? null : current);
+    };
+    return { cv_scored: track('cv_scored'), lifecycle: track('lifecycle') };
+  }, []);
 
   return (
     <section className="email-mailbox" aria-label="Quản lý email">
@@ -267,32 +290,54 @@ export function EmailMailboxView({
                 </label>
                 <button
                   type="button"
-                  className={sourceFilter === 'lifecycle'
+                  className={templateFilter === 'lifecycle'
                     ? 'email-source-filter-button is-active'
                     : 'email-source-filter-button'}
-                  aria-pressed={sourceFilter === 'lifecycle'}
-                  onClick={() => onSourceFilterChange('lifecycle')}
+                  aria-pressed={templateFilter === 'lifecycle'}
+                  onClick={() => onTemplateFilterChange('lifecycle')}
                 >
                   Nhân sự
                 </button>
                 <button
                   type="button"
-                  className={sourceFilter === 'cv_scored'
+                  className={templateFilter === 'cv_scored'
                     ? 'email-source-filter-button is-active'
                     : 'email-source-filter-button'}
-                  aria-pressed={sourceFilter === 'cv_scored'}
-                  onClick={() => onSourceFilterChange('cv_scored')}
+                  aria-pressed={templateFilter === 'cv_scored'}
+                  onClick={() => onTemplateFilterChange('cv_scored')}
                 >
                   Phỏng vấn
                 </button>
-                <button
-                  type="button"
-                  className="email-create-template-button"
-                  disabled={!canCreateEmailTemplate(active, Boolean(templateRepositories), templateReady[templateCategory])}
-                  onClick={() => onCreateTemplate(templateCategory)}
-                >
-                  Tạo mẫu Email
-                </button>
+                <div className="email-create-template-wrapper">
+                  <button
+                    type="button"
+                    className="email-create-template-button"
+                    aria-haspopup={templateFilter === 'all' ? 'menu' : undefined}
+                    aria-expanded={templateFilter === 'all' ? createMenuOpen : undefined}
+                    disabled={!templatePanels.some(({ category }) => canCreateCategory(category))}
+                    onClick={() => {
+                      if (templateFilter === 'all') setCreateMenuOpen(open => !open);
+                      else createTemplate(templateFilter);
+                    }}
+                  >
+                    Tạo mẫu Email
+                  </button>
+                  {templateFilter === 'all' && createMenuOpen && (
+                    <div className="email-create-template-menu" role="menu">
+                      {templatePanels.map(({ category, label }) => (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          key={category}
+                          disabled={!canCreateCategory(category)}
+                          onClick={() => createTemplate(category)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </> : <>
               <button
                 type="button"
@@ -369,19 +414,26 @@ export function EmailMailboxView({
             </aside>
 
             <div className="email-message-list" aria-label={isTemplateMode ? 'Danh sách mẫu email' : 'Danh sách email'}>
-              {templateRepositories && templatePanels.map(({ category, mode }) => (
-                <div key={category} hidden={contentMode !== mode}>
-                  <InterviewEmailTemplatePanel
-                    repository={templateRepositories[category]}
-                    category={category}
-                    active={active && contentMode === mode}
-                    createRequest={templateCreateRequests[category]}
-                    query={query}
-                    onCountChange={templatePanelCallbacks[category].onCountChange}
-                    onReadyChange={templatePanelCallbacks[category].onReadyChange}
-                  />
-                </div>
-              ))}
+              {templateRepositories && templatePanels.map(({ category }) => {
+                const visible = showsTemplates && isTemplateCategoryVisible(templateFilter, category);
+                const hiddenByOtherForm = templateFilter === 'all'
+                  && editingCategory !== null
+                  && editingCategory !== category;
+                return (
+                  <div key={category} hidden={!visible || hiddenByOtherForm}>
+                    <InterviewEmailTemplatePanel
+                      repository={templateRepositories[category]}
+                      category={category}
+                      active={active && visible}
+                      createRequest={templateCreateRequests[category]}
+                      query={query}
+                      onCountChange={templatePanelCallbacks[category].onCountChange}
+                      onReadyChange={templatePanelCallbacks[category].onReadyChange}
+                      onEditingChange={editingCallbacks[category]}
+                    />
+                  </div>
+                );
+              })}
               {contentMode === 'template-unavailable' && (
                 <div className="email-empty-state">Không thể truy cập mẫu email</div>
               )}

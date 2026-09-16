@@ -7,7 +7,10 @@ import {
   InterviewEmailTemplateRepository,
   type InterviewEmailTemplateFileGateway,
 } from '../src/ui/email-templates/interview-email-template-repository';
-import { getEmailMailboxContentMode } from '../src/ui/email-templates/interview-email-template-state';
+import {
+  getEmailMailboxContentMode,
+  isTemplateCategoryVisible,
+} from '../src/ui/email-templates/interview-email-template-state';
 import type { ActiveTemplateStore } from '../src/ui/email-templates/active-template-store';
 
 class MemoryStore implements ActiveTemplateStore {
@@ -108,7 +111,11 @@ describe('employee email templates', () => {
     expect(rendered.body).toContain('Ngày bắt đầu làm việc: [BỔ SUNG: ngày bắt đầu làm việc]');
   });
 
-  it('routes the Nhân sự template filter to the employee panel', () => {
+  it('shows every template until a category is picked, then routes to that panel', () => {
+    expect(getEmailMailboxContentMode('templates', 'all', true)).toBe('all-templates');
+    expect(isTemplateCategoryVisible('all', 'cv_scored')).toBe(true);
+    expect(isTemplateCategoryVisible('all', 'lifecycle')).toBe(true);
+    expect(isTemplateCategoryVisible('lifecycle', 'cv_scored')).toBe(false);
     expect(getEmailMailboxContentMode('templates', 'lifecycle', true)).toBe('employee-templates');
     expect(getEmailMailboxContentMode('templates', 'cv_scored', true)).toBe('interview-templates');
     expect(getEmailMailboxContentMode('templates', 'lifecycle', false)).toBe('template-unavailable');

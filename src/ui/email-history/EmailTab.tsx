@@ -48,6 +48,8 @@ export default function EmailTab({ active }: EmailTabProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<EmailHistoryFilter>('all');
   const [sourceFilter, setSourceFilter] = useState<EmailSourceFilter>('all');
+  // Separate from `sourceFilter` so browsing templates never leaves the history lists filtered.
+  const [templateFilter, setTemplateFilter] = useState<EmailSourceFilter>('all');
   const [query, setQuery] = useState('');
   const [dateRange, setDateRange] = useState<EmailHistoryDateRange>({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
@@ -77,6 +79,7 @@ export default function EmailTab({ active }: EmailTabProps) {
     setSelectedId(null);
     setFilter('all');
     setSourceFilter('all');
+    setTemplateFilter('all');
     setQuery('');
     setDateRange({ from: '', to: '' });
     setTemplateCreateRequests(ZERO_COUNTS);
@@ -159,6 +162,7 @@ export default function EmailTab({ active }: EmailTabProps) {
       selectedId={selectedId}
       filter={filter}
       sourceFilter={sourceFilter}
+      templateFilter={templateFilter}
       query={query}
       dateRange={dateRange}
       active={active}
@@ -174,13 +178,9 @@ export default function EmailTab({ active }: EmailTabProps) {
       templatePanelCallbacks={templatePanelCallbacks}
       onSelect={setSelectedId}
       onBack={() => setSelectedId(null)}
-      onFilterChange={nextFilter => {
-        setFilter(nextFilter);
-        if (nextFilter === 'templates') setSourceFilter('cv_scored');
-      }}
-      onSourceFilterChange={source => {
-        setSourceFilter(current => filter === 'templates' ? source : toggleEmailSourceFilter(current, source));
-      }}
+      onFilterChange={setFilter}
+      onSourceFilterChange={source => setSourceFilter(current => toggleEmailSourceFilter(current, source))}
+      onTemplateFilterChange={source => setTemplateFilter(current => toggleEmailSourceFilter(current, source))}
       onCreateTemplate={category => setTemplateCreateRequests(current => ({
         ...current,
         [category]: current[category] + 1,

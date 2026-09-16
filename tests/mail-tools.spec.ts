@@ -92,6 +92,21 @@ describe('hrm.mail.* tools', () => {
     expect(result.content[0].text).not.toContain('secret detail');
   });
 
+  it('with recordHistory: false only delivers (sanitized) and returns the verified requestedBy', async () => {
+    const deliver = vi.fn(async () => undefined);
+    setMailToolDependencies({ createTrackedMail: () => ({ send, retry, deliver }) as never });
+
+    const result = await handleMailTool('hrm.mail.send', { ...base, recordHistory: false, requestedBy: 'spoofed' }, actor);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({ htmlContent: '<p>x</p>', recipientEmail: 'a@x.vn' }));
+    expect(JSON.parse(result.content[0].text)).toEqual({ itemId: null, status: 'delivered', requestedBy: 'u1' });
+  });
+
+  it('rejects a non-boolean recordHistory', async () => {
+    await expect(handleMailTool('hrm.mail.send', { ...base, recordHistory: 'no' }, actor)).rejects.toThrow('recordHistory');
+  });
+
   it('retry requires itemId and uses the actor room', async () => {
     await expect(handleMailTool('hrm.mail.retry', {}, actor)).rejects.toThrow('itemId is required');
     await handleMailTool('hrm.mail.retry', { itemId: 'I1', roomId: 'room-1' }, actor);

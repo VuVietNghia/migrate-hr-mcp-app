@@ -8,6 +8,7 @@ import {
   type EmailHistoryStageIds,
 } from '../../services/mail/email-history-model';
 import { restCall } from '../privos-rest';
+import { UserSessionTrackedMail } from './user-session-tracked-mail';
 import { fetchAllListItems } from '../list-item-paging';
 
 /**
@@ -91,11 +92,9 @@ export class EmailHistoryService {
       .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
   }
 
+  /** Runs over the user session (see `UserSessionTrackedMail`), not the bot-credential `hrm.mail.retry`. */
   async retry(roomId: string, itemId: string): Promise<void> {
-    await this.app.callServerTool({
-      name: 'hrm.mail.retry',
-      arguments: { roomId, itemId },
-    });
+    await new UserSessionTrackedMail(this.app).retry(roomId, itemId);
   }
 
   async delete(itemId: string): Promise<void> {

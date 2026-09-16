@@ -36,6 +36,8 @@ export interface InterviewEmailTemplatePanelProps {
   query: string;
   onCountChange(count: number): void;
   onReadyChange(ready: boolean): void;
+  /** True while this panel shows a template detail or the create form instead of its list. */
+  onEditingChange?(editing: boolean): void;
 }
 
 type EditableField = 'subject' | 'body';
@@ -82,6 +84,7 @@ export function InterviewEmailTemplatePanel({
   query,
   onCountChange,
   onReadyChange,
+  onEditingChange,
 }: InterviewEmailTemplatePanelProps) {
   const panelRef = useRef<TemplatePanelState>(createTemplatePanelState());
   const [panel, setPanel] = useState<TemplatePanelState>(panelRef.current);
@@ -162,6 +165,11 @@ export function InterviewEmailTemplatePanel({
     operationGenerationRef.current += 1;
     refreshInFlightRef.current = null;
   }, []);
+
+  const editing = panel.view.kind !== 'list';
+  useEffect(() => {
+    onEditingChange?.(editing);
+  }, [editing, onEditingChange]);
 
   useEffect(() => {
     if (handledCreateRequest.current === createRequest) return;

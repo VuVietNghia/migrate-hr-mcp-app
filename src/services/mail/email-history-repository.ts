@@ -182,7 +182,6 @@ export class EmailHistoryRepository {
       requestedBy,
     };
 
-    // The item is created directly in its final stage, so no follow-up move is needed.
     const response = parseToolResponse(await this.callTool('mcpapp.lists.createItem', {
       listId: store.listId,
       title: payload.subject,
@@ -192,6 +191,14 @@ export class EmailHistoryRepository {
     const item = response?.item || response;
     const itemId = getListId(item);
     if (!itemId) throw new Error('Không lấy được item ID sau khi tạo lịch sử email.');
+
+    // The mediated `mcpapp.lists.createItem` ignores `stageId` and files every new item under the list's
+    // first stage ("Email Phỏng vấn - Đã gửi"). A lifecycle or failed row left there is dropped by
+    // `parseEmailHistoryItem` (source/status must match the stage), so move it unless the Hub echoed
+    // back the right stage.
+    if (item?.stageId !== stageId) {
+      await this.callTool('mcpapp.lists.moveItemToStage', { itemId, stageId });
+    }
 
     return { ...draft, id: itemId };
   }

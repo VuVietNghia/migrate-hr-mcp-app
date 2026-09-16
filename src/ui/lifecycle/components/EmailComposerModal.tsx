@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { EmployeeProfile } from '../types';
-import { parseToolResult, usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { UserSessionTrackedMail } from '../../email-history/user-session-tracked-mail';
 import { useEmployeeEmailTemplateRepository } from '../di/EmployeeEmailTemplateContext';
 import { isValidEmailAddress } from '../../utils/email-validation';
 import {
@@ -76,6 +77,9 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
     setTemplateState(createInviteTemplateLoadState());
     setSubject('');
     setContent('');
+    // The modal stays mounted between openings (ProfileCard only flips isOpen), so a send
+    // banner left behind would greet the next opening as if that send had just happened.
+    setStatusMessage(null);
     if (!isOpen) return;
 
     let current = true;
@@ -118,12 +122,10 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
     setIsSending(true);
     setStatusMessage(null);
     try {
-      const response = await app.callServerTool({
-        name: 'hrm.mail.send',
-        arguments: buildLifecycleMailArguments({ roomId, profile, subject, content }),
-      });
-
-      const sentUnlogged = (parseToolResult(response) as { status?: string } | null)?.status === 'sent_unlogged';
+      const { logged } = await new UserSessionTrackedMail(app).send(
+        buildLifecycleMailArguments({ roomId, profile, subject, content }),
+      );
+      const sentUnlogged = !logged;
       const message = sentUnlogged
         ? `Đã gửi email tới ${targetEmail}. Lưu ý: chưa lưu được vào lịch sử email, không cần gửi lại.`
         : `Đã gửi email thành công tới ${targetEmail}!`;

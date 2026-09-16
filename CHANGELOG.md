@@ -19,6 +19,18 @@ in one commit.
   (one row per Room per category) replaces the `_active-template.md` pointer file in Room Files.
   `ensureInitialized` copies an existing pointer into the database and deletes the file.
 
+- **Emails sent from the UI are logged again without an agent-bot credential.** The composers call
+  `hrm.mail.send` with `recordHistory: false` (delivery only, still sanitized and actor-verified)
+  and write the Tất cả / Đã gửi / Gửi lỗi row themselves over the user session
+  (`UserSessionTrackedMail`); "Gửi lại" runs the same way. Before, the server's history write
+  failed with `agent_bot_credential_absent` and every email went out unlogged. The server path is
+  unchanged for callers that omit the flag. `recordHistory` is not yet declared in
+  `privos-app.json`'s schema — add it with the next manifest change.
+- **Employee and failed emails show up in the mailbox.** `mcpapp.lists.createItem` ignores
+  `stageId` and files every new history row under the first stage ("Email Phỏng vấn - Đã gửi"),
+  where `parseEmailHistoryItem` dropped any row whose source/status did not match. The repository
+  now moves the new row to its stage unless the Hub echoed the right one.
+
 ### Fixed
 
 - **UI assets no longer 404 after a rebuild.** The shell is now served with its JS and CSS

@@ -60,8 +60,28 @@ describe('EmailHistoryRepository', () => {
       'mcpapp.lists.getAll',
       'mcpapp.lists.create',
       'mcpapp.lists.createItem',
+      // The stub echoes no stageId, like the real Hub, which files new items under the first stage.
+      'mcpapp.lists.moveItemToStage',
     ]);
     expect(hub.calls[2][1]).toMatchObject({ listId: 'L1', stageId: 'st0', title: 'Hi' });
+    expect(hub.calls[3][1]).toEqual({ itemId: 'I1', stageId: 'st0' });
+  });
+
+  it('moves a lifecycle row out of the first stage the Hub drops it into', async () => {
+    const hub = fakeHub(true);
+    const repo = new EmailHistoryRepository(hub.call);
+    const record = await repo.createResult('room-1', { ...payload, source: 'lifecycle' }, 'sent');
+    expect(record.stageId).toBe('st2');
+    expect(hub.calls.find(([n]) => n === 'mcpapp.lists.moveItemToStage')?.[1]).toEqual({ itemId: 'I1', stageId: 'st2' });
+  });
+
+  it('skips the move when the Hub already filed the item under the requested stage', async () => {
+    const hub = fakeHub(true);
+    const call = async (name: string, args: Record<string, unknown> = {}) => (
+      name === 'mcpapp.lists.createItem' ? (hub.calls.push([name, args]), { item: { _id: 'I1', stageId: args.stageId } }) : hub.call(name, args)
+    );
+    await new EmailHistoryRepository(call).createResult('room-1', payload, 'failed', new Error('x'));
+    expect(hub.calls.map(([n]) => n)).not.toContain('mcpapp.lists.moveItemToStage');
   });
 
   it('reuses an existing list and caches the store per room', async () => {

@@ -11,6 +11,7 @@ import { usePolling } from '../hooks/usePolling';
 import { CVBoardPollingGuard } from './polling-sync';
 import { fetchScreeningListItems, readBoardStatuses } from './cv-list-reader';
 import { buildTrackedInviteEmailRequest } from './invite-email-request';
+import { UserSessionTrackedMail } from '../email-history/user-session-tracked-mail';
 import { createInterviewEmailTemplateRepository } from '../email-templates/interview-email-template-default';
 import type { InterviewEmailTemplateDocument } from '../email-templates/interview-email-template';
 import {
@@ -426,9 +427,8 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
         throw new Error('Không tìm thấy đợt tuyển dụng của CV này.');
       }
 
-      await app.callServerTool({
-        name: 'hrm.mail.send',
-        arguments: buildTrackedInviteEmailRequest({
+      const { logged } = await new UserSessionTrackedMail(app).send(
+        buildTrackedInviteEmailRequest({
           roomId,
           cvItemId: selectedCVForInvite._id,
           cvListId: selectedBoard.listId,
@@ -438,7 +438,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
           subject: inviteSubject,
           body: inviteEmailBody,
         }),
-      });
+      );
 
       const updatedCustomFields = markInviteMailSent(selectedCVForInvite.customFields);
       await restCall(app, 'POST', 'items.update', {
@@ -467,7 +467,9 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
             }
           : cv),
       })));
-      alert(`Đã gửi email mời phỏng vấn thành công tới ${targetEmail}!`);
+      alert(logged
+        ? `Đã gửi email mời phỏng vấn thành công tới ${targetEmail}!`
+        : `Đã gửi email mời phỏng vấn tới ${targetEmail}. Lưu ý: chưa lưu được vào lịch sử email, không cần gửi lại.`);
       setInviteModalOpen(false);
     } catch (err: any) {
       console.error('Lỗi gửi email:', err);

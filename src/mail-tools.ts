@@ -35,6 +35,9 @@ export const MAIL_TOOL_DEFINITIONS = [
 				cvItemId: { type: 'string' },
 				cvListId: { type: 'string' },
 				jdName: { type: 'string' },
+				// Not yet in privos-app.json (adding it changes the pinned manifest digest); the manifest
+				// schema has no `additionalProperties: false`, so the Hub already forwards it.
+				recordHistory: { type: 'boolean' },
 			},
 			required: ['source', 'toName', 'toEmail', 'subject', 'htmlContent'],
 		},
@@ -61,7 +64,7 @@ const MAX_HTML = 200_000;
 // One relay (one queue) per process — the rate limit is per EmailJS account, not per room.
 const relay = new MailRelayService();
 
-type TrackedMail = Pick<TrackedMailService, 'send' | 'retry'>;
+type TrackedMail = Pick<TrackedMailService, 'send' | 'retry' | 'deliver'>;
 let dependencies: { createTrackedMail: (roomId: string) => TrackedMail } = {
 	createTrackedMail: (roomId) =>
 		new TrackedMailService(new EmailHistoryRepository(createRoomHubToolCaller(roomId)), relay),
@@ -109,8 +112,10 @@ export async function handleMailTool(name: MailToolName, rawArgs: unknown, actor
 	if (!rawHtml.trim()) throw new Error('htmlContent is required');
 	if (rawHtml.length > MAX_HTML) throw new Error(`htmlContent exceeds ${MAX_HTML} characters`);
 
-	const outcome = await tracked.send({
-		roomId,
+	if (args.recordHistory !== undefined && typeof args.recordHistory !== 'boolean') {
+		throw new Error('recordHistory must be a boolean');
+	}
+	const payload = {
 		source,
 		recipientName: requireString(args, 'toName', 256),
 		recipientEmail: toEmail,
@@ -119,8 +124,18 @@ export async function handleMailTool(name: MailToolName, rawArgs: unknown, actor
 		cvItemId: optionalString(args, 'cvItemId'),
 		cvListId: optionalString(args, 'cvListId'),
 		jdName: optionalString(args, 'jdName'),
-		requestedBy: actor!.userId,
-	});
+	} as const;
+
+	// The iframe writes the history row itself with the user's own `lists:write`, because the server
+	// path needs the installation-bot credential that only a workspace admin can issue. `requestedBy`
+	// is still returned from the verified actor so the UI never has to trust its own claim.
+	if (args.recordHistory === false) {
+		await tracked.deliver(payload);
+		const delivered = { itemId: null, status: 'delivered' as const, requestedBy: actor!.userId };
+		return { content: [{ type: 'text' as const, text: JSON.stringify(delivered) }] };
+	}
+
+	const outcome = await tracked.send({ roomId, ...payload, requestedBy: actor!.userId });
 	// `historyError` stays server-side: the UI only needs to know the mail went out unlogged.
 	const result = outcome.status === 'sent'
 		? { itemId: outcome.record.id, status: outcome.record.status }

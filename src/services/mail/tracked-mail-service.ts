@@ -53,6 +53,11 @@ export class TrackedMailService {
     private readonly delivery: MailDeliveryGateway,
   ) {}
 
+  /** Delivery only: for a caller that keeps the history row itself (the UI, over the user session). */
+  async deliver(payload: StoredEmailPayload): Promise<void> {
+    await this.delivery.queueMail(toDeliveryParams(payload));
+  }
+
   async send(request: SendTrackedMailRequest): Promise<SendTrackedMailOutcome> {
     const { roomId, requestedBy, ...payload } = request;
 
