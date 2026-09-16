@@ -296,3 +296,91 @@ describe('PrivOSLifecycleService roster paging', () => {
     await expect(service.loadProfiles('room-1')).rejects.toThrow(/không mang _id/i);
   });
 });
+
+describe('PrivOSLifecycleService khong goi tool khong ton tai', () => {
+  it('khong goi debug_log khi mot item khong khop stageId', async () => {
+    const { app, calls } = createAppStub({
+      'mcpapp.lists.getAll': () => [HR_LIST],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      // stageId khong co trong STAGES, dung nhanh fallback cua getStageName.
+      'mcpapp.lists.getItems': () => [
+        { _id: 'emp-1', name: 'NV 1', stageId: 'stage-khong-ton-tai', customFields: [] },
+      ],
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await service.loadProfiles('room-1');
+    expect(calls.map(c => c.name)).not.toContain('debug_log');
+  });
+});
+
+describe('PrivOSLifecycleService khop ten field chinh xac', () => {
+  const LIST_HAI_TRUONG_NGAY = {
+    _id: 'list-1',
+    name: '[HR-MCP-App] Hồ sơ nhân sự',
+    fieldDefinitions: [
+      { _id: 'fd-ngay-sinh', name: 'Ngày sinh', type: 'DATE' },
+      { _id: 'fd-ngay-bat-dau', name: 'Ngày bắt đầu', type: 'DATE' },
+    ],
+    stages: STAGES,
+  };
+
+  it('khong ghi ngay vao lam de len truong Ngay sinh khi tao ho so', async () => {
+    const { app, calls } = createAppStub({
+      'mcpapp.lists.getAll': () => [LIST_HAI_TRUONG_NGAY],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.createItem': () => ({ _id: 'emp-moi' }),
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await service.createProfile('room-1', {
+      name: 'NV Moi',
+      startDate: '2026-01-05',
+    } as never);
+
+    const createCall = calls.find(c => c.name === 'mcpapp.lists.createItem');
+    const customFields = createCall!.arguments!.customFields as Array<{ fieldId: string; value: unknown }>;
+    expect(customFields.map(f => f.fieldId)).toEqual(['fd-ngay-bat-dau']);
+    expect(customFields.find(f => f.fieldId === 'fd-ngay-sinh')).toBeUndefined();
+  });
+
+  it('doc startDate tu Ngay bat dau chu khong phai Ngay sinh', async () => {
+    const { app } = createAppStub({
+      'mcpapp.lists.getAll': () => [LIST_HAI_TRUONG_NGAY],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.getItems': () => [{
+        _id: 'emp-1',
+        name: 'NV 1',
+        stageId: 'stage-1',
+        customFields: [
+          { fieldId: 'fd-ngay-sinh', value: '1990-03-20' },
+          { fieldId: 'fd-ngay-bat-dau', value: '2026-01-05' },
+        ],
+      }],
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    const profiles = await service.loadProfiles('room-1');
+    expect(profiles[0].startDate).toBe('2026-01-05');
+  });
+
+  it('bo qua truong co ten khong nam trong bang alias', async () => {
+    const { app } = createAppStub({
+      'mcpapp.lists.getAll': () => [{
+        ...LIST_HAI_TRUONG_NGAY,
+        fieldDefinitions: [{ _id: 'fd-ghi-chu', name: 'Ghi chú nội bộ', type: 'TEXT' }],
+      }],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.getItems': () => [{
+        _id: 'emp-1',
+        name: 'NV 1',
+        stageId: 'stage-1',
+        customFields: [{ fieldId: 'fd-ghi-chu', value: 'khong duoc gan vao dau ca' }],
+      }],
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    const profile = (await service.loadProfiles('room-1'))[0] as Record<string, unknown>;
+    expect(Object.values(profile)).not.toContain('khong duoc gan vao dau ca');
+  });
+});

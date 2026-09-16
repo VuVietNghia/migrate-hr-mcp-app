@@ -15,6 +15,35 @@ import {
   validateMarkdownAssessment,
   type CvAssessmentInput,
 } from './cv-scoring-policy';
+import { redactFileName } from './log-redaction';
+
+/**
+ * Number of back-to-back `ai-messages.list` failures tolerated before giving up. The poll loop
+ * used to `continue` past every network error, so a session whose transport had died still burned
+ * the full ten minutes and then reported a timeout — the wrong cause.
+ */
+const MAX_CONSECUTIVE_POLL_FAILURES = 10;
+
+/**
+ * `setTimeout` that also loses to an abort. The poll below runs for up to ten minutes; without
+ * this an unmounted tab keeps the loop, and its REST calls, alive to the end.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+
+  return new Promise<void>((resolve, reject) => {
+    let onAbort: () => void = () => {};
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 const CV_SCREENING_SYSTEM_DIRECTIVES = `<system_directives>
   <role>
@@ -729,7 +758,7 @@ KHI HOÀN TẤT, BẠN BẮT BUỘC PHẢI TRẢ VỀ:
     return null;
   }
 
-  async askAI(content: string, _fileName?: string, fileId?: string, onLog?: (msg: string) => void, customFlowChatId?: string): Promise<{ text: string }> {
+  async askAI(content: string, _fileName?: string, fileId?: string, onLog?: (msg: string) => void, customFlowChatId?: string, signal?: AbortSignal): Promise<{ text: string }> {
 
     let finalPrompt = content;
 
@@ -770,19 +799,31 @@ ${content}
       await restCall(this.app, 'POST', 'ai-messages.startGeneration', { body: { messageId: aiMessageId } });
     }
 
-    // Tăng số lần lặp lên 300 (300 x 2s = 600s = 10 phút) để đảm bảo AI có đủ thời gian đọc và xuất MD
+    // 300 x 2s = 600s = 10 phút, đủ để AI đọc file rồi xuất MD.
+    let consecutiveFailures = 0;
+
     for (let i = 0; i < 300; i++) {
-      await new Promise(r => setTimeout(r, 2000));
+      await sleep(2000, signal);
 
       let res;
       try {
         res = await restCall<any>(this.app, 'GET', 'ai-messages.list', {
           query: { sessionId, count: 20 }
         });
+        consecutiveFailures = 0;
       } catch (err: any) {
-        if (onLog) onLog(`>> Lỗi mạng tạm thời, đang thử lại... (Chi tiết: ${err.message || err})`);
-        continue; // Bỏ qua lần lặp này và thử lại ở lần sau
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          throw new Error(
+            `Mất kết nối khi chờ AI: ${MAX_CONSECUTIVE_POLL_FAILURES} lần gọi ai-messages.list liên tiếp `
+            + `đều lỗi. Lần cuối: ${err?.message || err}`
+          );
+        }
+        if (onLog) onLog(`>> Lỗi mạng tạm thời (${consecutiveFailures}/${MAX_CONSECUTIVE_POLL_FAILURES}), đang thử lại... (Chi tiết: ${err?.message || err})`);
+        continue;
       }
+
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
       const list = Array.isArray(res?.messages) ? res.messages : [];
       const aiMsg = [...list].reverse().find((m: any) => m.type === 'ai');
@@ -809,7 +850,7 @@ ${content}
       .replace(/Đ/g, "D").replace(/đ/g, "d")
       .replace(/\s+/g, '_');
 
-    console.log(`[Email Debug] Bắt đầu tìm file MD cho: ${normalizedName} (BaseName: ${baseName}, Sanitize: ${sanitizedBaseName})`);
+    console.log(`[Email Debug] Bắt đầu tìm file MD cho: ${redactFileName(normalizedName)}`);
 
     const fileMonthMatch = baseName.match(/^(\d{4}-\d{2})/);
     const fileMonth = fileMonthMatch ? fileMonthMatch[1] : new Date().toISOString().slice(0, 7);
@@ -835,21 +876,23 @@ ${content}
       `hr-miniapp/outputs-cv/${fileMonth}/01-failed/${sanitizedBaseName}`,
     ];
     for (const path of processPaths) {
-      console.log(`[Email Debug] Đang thử lấy nội dung từ đường dẫn: ${path}`);
+      console.log(`[Email Debug] Đang thử lấy nội dung từ đường dẫn: ${redactFileName(path)}`);
       const content = await getFileContent(this.app, path);
       if (content && content.trim().length > 0) {
-        console.log(`[Email Debug] ĐÃ TÌM THẤY file tại: ${path} (Độ dài: ${content.length} ký tự)`);
+        console.log(`[Email Debug] ĐÃ TÌM THẤY file tại: ${redactFileName(path)} (Độ dài: ${content.length} ký tự)`);
         return content;
       }
     }
-    console.warn(`[Email Debug] ⚠ KHÔNG TÌM THẤY file MD nào cho: ${normalizedName}.`);
+    console.warn(`[Email Debug] KHÔNG TÌM THẤY file MD nào cho: ${redactFileName(normalizedName)}.`);
 
     // Thử list các file trong thư mục để xem AI đã thực sự tạo ra những file gì
     try {
       const listPass: any = await this.app.rest({ method: 'GET', path: 'api/files/list', query: { path: `${this.roomId}/hr-miniapp/outputs-cv/${fileMonth}/02-passed_screening` } });
       const listFail: any = await this.app.rest({ method: 'GET', path: 'api/files/list', query: { path: `${this.roomId}/hr-miniapp/outputs-cv/${fileMonth}/01-failed` } });
-      console.log(`[Email Debug] DANH SÁCH CÁC FILE ĐANG CÓ TRONG 02-passed_screening/:`, listPass?.body?.files || listPass?.files);
-      console.log(`[Email Debug] DANH SÁCH CÁC FILE ĐANG CÓ TRONG 01-failed/:`, listFail?.body?.files || listFail?.files);
+      const passedFiles = listPass?.body?.files || listPass?.files;
+      const failedFiles = listFail?.body?.files || listFail?.files;
+      console.log(`[Email Debug] Số file trong 02-passed_screening/: ${Array.isArray(passedFiles) ? passedFiles.length : 'không đọc được'}`);
+      console.log(`[Email Debug] Số file trong 01-failed/: ${Array.isArray(failedFiles) ? failedFiles.length : 'không đọc được'}`);
     } catch (e: any) {
       console.error(`[Email Debug] Không thể lấy danh sách file:`, e.message);
     }

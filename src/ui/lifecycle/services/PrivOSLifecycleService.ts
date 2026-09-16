@@ -1,5 +1,7 @@
 import { McpApp, parseToolResult } from '@privos_ai/app-react';
 import { EmployeeProfile, ILifecycleService, PassedCandidate } from '../types';
+import { fetchAllListItems, LIST_ITEMS_PAGE_SIZE } from '../../list-item-paging';
+import { resolveProfileFieldKey } from '../profile-field-aliases';
 
 export class PrivOSLifecycleService implements ILifecycleService {
   private static readonly SYSTEM_PREFIX = '[HR-MCP-App]';
@@ -7,8 +9,8 @@ export class PrivOSLifecycleService implements ILifecycleService {
   private static readonly SYSTEM_CONFIG_NAME = '[Hệ thống] Không xoá - Cấu hình Kanban';
   private static readonly DEFAULT_STAGE = 'Mới nhận việc';
 
-  /** One `mcpapp.lists.getItems` page. 100 is the value this call has used since the migration. */
-  private static readonly ITEMS_PAGE_SIZE = 100;
+  /** One `mcpapp.lists.getItems` page. The hub caps this at 100 (`tools_lists.md:270`). */
+  private static readonly ITEMS_PAGE_SIZE = LIST_ITEMS_PAGE_SIZE;
 
   /** 100 × 100 = 10,000 items — the same ceiling `PAYROLL_MAX_PAGES` gives the payroll read. */
   private static readonly ITEMS_MAX_PAGES = 100;
@@ -364,53 +366,17 @@ export class PrivOSLifecycleService implements ILifecycleService {
    * treats any employee missing from this roster as an orphan and deletes their payroll row, so
    * a silently truncated read at employee 101 destroyed real salary data.
    *
-   * `mcpapp.lists.getItems` is not documented in this repo as supporting `offset`, so rather than
-   * assume it does, every page is checked for progress: a page that yields no unseen id means the
-   * hub ignored `offset`, and that throws. Returning a partial roster is the failure mode this
-   * method exists to prevent, so it is never the fallback.
+   * `missingId: 'throw'` because `mapItemToProfile` gives an id-less item `_id: undefined`, and
+   * the payroll GC reconciles on exactly that `_id` — a roster carrying anonymous items makes the
+   * GC tombstone the wrong salary row. Returning a partial roster is the failure mode this method
+   * exists to prevent, so it is never the fallback.
    */
   private async fetchListItems(listId: string): Promise<any[]> {
-    const pageSize = PrivOSLifecycleService.ITEMS_PAGE_SIZE;
-    const collected: any[] = [];
-    const seenIds = new Set<string>();
-
-    for (let page = 0; page < PrivOSLifecycleService.ITEMS_MAX_PAGES; page += 1) {
-      const res: any = await this.app.callServerTool({
-        name: 'mcpapp.lists.getItems',
-        arguments: { listId, count: pageSize, offset: page * pageSize }
-      });
-
-      const parsed: any = parseToolResult(res);
-      const items: any[] = Array.isArray(parsed) ? parsed : (parsed?.items || []);
-
-      let fresh = 0;
-      for (const item of items) {
-        const id = typeof item?._id === 'string' ? item._id : (typeof item?.id === 'string' ? item.id : '');
-        if (!id) {
-          throw new Error(
-            `Danh sách ${listId} có item không mang _id lẫn id nên không đối chiếu được với bảng lương. Dừng để không trả về roster không an toàn.`
-          );
-        }
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
-        collected.push(item);
-        fresh += 1;
-      }
-
-      if (items.length > 0 && fresh === 0) {
-        throw new Error(
-          `Không đọc hết được danh sách ${listId}: trang ${page + 1} chỉ trả về item đã thấy, `
-          + 'nghĩa là mcpapp.lists.getItems bỏ qua tham số offset. Dừng để không trả về roster thiếu.'
-        );
-      }
-
-      if (items.length < pageSize) return collected;
-    }
-
-    throw new Error(
-      `Danh sách ${listId} vượt quá ${PrivOSLifecycleService.ITEMS_MAX_PAGES * pageSize} item. `
-      + 'Dừng để không trả về roster thiếu.'
-    );
+    return fetchAllListItems(this.app, listId, {
+      missingId: 'throw',
+      maxPages: PrivOSLifecycleService.ITEMS_MAX_PAGES,
+      pageSize: PrivOSLifecycleService.ITEMS_PAGE_SIZE,
+    });
   }
 
   private createFieldDefinitionMap(fieldDefinitions: any[] | undefined): Map<string, any> {
@@ -473,18 +439,14 @@ export class PrivOSLifecycleService implements ILifecycleService {
     else if (typeof item.status === 'string' && isValidStatus(item.status)) resolvedStatus = item.status;
     else if (item.stage?.name && isValidStatus(item.stage.name)) resolvedStatus = item.stage.name;
     
-    console.warn(`[PrivOSLifecycleService] Item ${item._id} mapped to status: "${resolvedStatus}". Raw item info:`, { stageId, stage: item.stage, status: item.status, stages });
-    
-    // Also send log to backend IDE terminal
-    try {
-      this.app.callServerTool({
-        name: 'debug_log',
-        arguments: {
-          message: `Item ${item._id} mapped to status: "${resolvedStatus}"`,
-          data: { stageId, stage: item.stage, status: item.status, stages }
-        }
-      }).catch(err => console.error("Failed to send debug log", err));
-    } catch(e) {}
+    // `stages` is identical for every item in the list, so it is left out: logging it once per
+    // item buried the one field that differs. The `debug_log` tool call that used to sit here was
+    // removed — no such tool is registered anywhere, so it was one failed relay round-trip per
+    // unmatched item, swallowed by its own `.catch`.
+    console.warn(
+      `[PrivOSLifecycleService] Item ${item._id} mapped to status: "${resolvedStatus}"`,
+      { stageId, stage: item.stage, status: item.status },
+    );
 
     return resolvedStatus;
   }
@@ -513,15 +475,24 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return rawValue;
   }
 
+  /**
+   * `profile` is built up field by field from room-defined custom fields, so it is `any` until
+   * it is cast to `EmployeeProfile` at the end of `mapItemToProfile`.
+   */
   private assignProfileFieldByName(profile: any, fieldName: string, value: any): void {
-    const fname = fieldName.toLowerCase();
+    const key = resolveProfileFieldKey(fieldName);
+    if (!key) return;
 
-    if (fname.includes('thoại') || fname.includes('phone')) profile.phone = value;
-    else if (fname.includes('email')) profile.email = value;
-    else if (fname.includes('vị trí') || fname.includes('position')) profile.position = value;
-    else if (fname.includes('phòng')) profile.department = value;
-    else if (fname.includes('ngày') || fname.includes('date')) profile.startDate = value;
-    else if (fname.includes('hồ sơ') || fname.includes('document')) profile.attachedFileObj = Array.isArray(value) ? value[0] : value;
+    switch (key) {
+      case 'phone': profile.phone = value; return;
+      case 'email': profile.email = value; return;
+      case 'position': profile.position = value; return;
+      case 'department': profile.department = value; return;
+      case 'startDate': profile.startDate = value; return;
+      case 'attachedFileObj':
+        profile.attachedFileObj = Array.isArray(value) ? value[0] : value;
+        return;
+    }
   }
 
   private buildCustomFieldsForCreation(data: Omit<EmployeeProfile, '_id' | 'status'>, fieldDefinitions: any[] | undefined): any[] {
@@ -541,14 +512,25 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return customFields;
   }
 
+  /**
+   * `fieldName` comes from a room-defined field definition, so it is the untyped side here.
+   * `data` is `Omit<EmployeeProfile, '_id' | 'status'>` at the only call site
+   * (`buildCustomFieldsForCreation`); the `any` is kept only so the two private helpers in this
+   * class keep a matching shape, not because the payload is dynamic.
+   */
   private getProfileValueByFieldName(data: any, fieldName: string): any {
-    const fname = fieldName.toLowerCase();
-    if (fname.includes('thoại') || fname.includes('phone')) return data.phone;
-    if (fname.includes('email')) return data.email;
-    if (fname.includes('vị trí') || fname.includes('position')) return data.position;
-    if (fname.includes('phòng')) return data.department;
-    if (fname.includes('ngày') || fname.includes('date')) return data.startDate;
-    return undefined;
+    const key = resolveProfileFieldKey(fieldName);
+    if (!key) return undefined;
+
+    switch (key) {
+      case 'phone': return data.phone;
+      case 'email': return data.email;
+      case 'position': return data.position;
+      case 'department': return data.department;
+      case 'startDate': return data.startDate;
+      // Tệp hồ sơ đi qua mcpapp.files rồi gắn vào description, không ghi thành custom field.
+      case 'attachedFileObj': return undefined;
+    }
   }
 
   private getRawValueForField(fd: any, displayValue: any): any {
