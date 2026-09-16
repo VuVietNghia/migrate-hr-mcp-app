@@ -1,4 +1,4 @@
-import { McpApp } from '@privos_ai/app-react';
+import { McpApp, parseToolResult } from '@privos_ai/app-react';
 import { restCall, getFileContent, createOrUpdateFile, ensureFolderPath, findFolderPath, readToolList } from './privos-rest';
 import { ICvContextBuilder } from './cv-context-builder';
 import cvProcessingGuidelinesRaw from './data/cv_processing_guidelines.md?raw';
@@ -15,6 +15,9 @@ import {
   validateMarkdownAssessment,
   type CvAssessmentInput,
 } from './cv-scoring-policy';
+
+/** JD formats the picker lists. Markdown/text are read as-is; the rest via the Hub parser. */
+const JD_FILE_EXTENSIONS = /\.(md|markdown|txt|pdf|docx?|rtf|odt)$/i;
 
 const CV_SCREENING_SYSTEM_DIRECTIVES = `<system_directives>
   <role>
@@ -249,7 +252,7 @@ export class PipelineService {
       if (onLog) onLog(`[DEBUG] Tìm thấy ${files.length} files trong thư mục hr-miniapp/jds.`);
 
       return files
-        .filter((f: any) => f.name?.endsWith('.md'))
+        .filter((f: any) => typeof f.name === 'string' && JD_FILE_EXTENSIONS.test(f.name))
         .map((f: any) => ({
           _id: f._id,
           name: f.name,
@@ -412,14 +415,13 @@ export class PipelineService {
     };
   }
 
-  async deleteFile(fileId: string): Promise<boolean> {
-    try {
-      await this.app.callServerTool({ name: 'mcpapp.files.delete', arguments: { fileId } });
-      return true;
-    } catch (err) {
-      console.error('Failed to delete file', err);
-      return false;
-    }
+  /**
+   * Deletes a Room Files entry. `callServerTool` resolves even when the tool answers with
+   * `isError` — a denied permission looks exactly like a success — so the result goes through
+   * `parseToolResult` and the Hub's own message reaches the caller instead of a silent no-op.
+   */
+  async deleteFile(fileId: string): Promise<void> {
+    parseToolResult(await this.app.callServerTool({ name: 'mcpapp.files.delete', arguments: { fileId } }));
   }
 
   async renameFile(fileId: string, newName: string): Promise<boolean> {

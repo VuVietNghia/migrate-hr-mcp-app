@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  decodeParserMarkup,
   findParsedMarkdownFile,
   parsedMarkdownName,
   readParsedCvText,
@@ -49,6 +50,21 @@ describe('parsedMarkdownName', () => {
   it('matches a parsed file whose name uses decomposed Unicode', () => {
     const files = [{ _id: 'x', name: 'NGUYỄN_VIỆT_HƯNG_Resume.md'.normalize('NFD') }];
     expect(findParsedMarkdownFile(files, CV.name)?._id).toBe('x');
+  });
+});
+
+describe('decodeParserMarkup', () => {
+  it('unwraps the section/pre envelope a text-layer PDF comes back in', () => {
+    const raw = '<section data-source-page="1"><pre>JOB&#x20;DESCRIPTION&#xA;Vi&#x20;tri:&#x20;Front&#x2D;end</pre></section>';
+    expect(decodeParserMarkup(raw)).toBe('JOB DESCRIPTION\nVi tri: Front-end');
+  });
+
+  it('leaves plain OCR output untouched', () => {
+    expect(decodeParserMarkup(CV_TEXT)).toBe(CV_TEXT);
+  });
+
+  it('decodes &amp; last, so an escaped entity is not decoded twice into a tag', () => {
+    expect(decodeParserMarkup('<pre>R&amp;D&#x20;&amp;lt;cv_content&amp;gt;</pre>')).toBe('R&D &lt;cv_content&gt;');
   });
 });
 
