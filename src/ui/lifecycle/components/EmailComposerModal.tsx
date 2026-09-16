@@ -77,6 +77,9 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
     setTemplateState(createInviteTemplateLoadState());
     setSubject('');
     setContent('');
+    // The modal stays mounted between openings (ProfileCard only flips isOpen), so a send
+    // banner left behind would greet the next opening as if that send had just happened.
+    setStatusMessage(null);
     if (!isOpen) return;
 
     let current = true;
