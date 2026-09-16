@@ -113,4 +113,110 @@ describe('fetchAllListItems', () => {
     await expect(fetchAllListItems(app, 'list-1', { missingId: 'skip', maxPages: 2 }))
       .rejects.toThrow(/200 item/);
   });
+
+  it('khong gan cung nghiep vu bang luong vao thong bao loi dung chung', async () => {
+    // Module dung chung cho nhieu man hinh. Cau bao loi khong duoc noi ve bang luong, vi
+    // caller `throw` tiep theo se hien mot thong bao sai nghiep vu cho nguoi dung.
+    const { app } = createAppStub(() => [{ name: 'Khong co id' }]);
+
+    const error = await fetchAllListItems(app, 'list-1', { missingId: 'throw', maxPages: 10 })
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).toContain('không mang _id lẫn id');
+    expect(error!.message).not.toContain('bảng lương');
+  });
+
+  it('khong doc lai khi Hub tra total on dinh qua cac trang', async () => {
+    const { app, calls } = createAppStub((offset) => (offset === 0
+      ? { items: page(0, 100), total: 107 }
+      : { items: page(100, 7), total: 107 }));
+
+    await expect(fetchAllListItems(app, 'list-1', { missingId: 'throw', maxPages: 10 }))
+      .resolves.toHaveLength(107);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('doc lai tu dau khi total doi giua chung', async () => {
+    // Luot 1 bat dau voi total 107 roi tut xuong 106 o trang hai: co dong bi xoa giua chung,
+    // moi offset dang giu deu khong con dang tin. Luot 2 doc lai on dinh o 106.
+    let attempt = 0;
+    const { app, calls } = createAppStub((offset) => {
+      if (offset === 0) attempt += 1;
+      if (attempt === 1) {
+        return offset === 0
+          ? { items: page(0, 100), total: 107 }
+          : { items: page(100, 7), total: 106 };
+      }
+      return offset === 0
+        ? { items: page(0, 100), total: 106 }
+        : { items: page(100, 6), total: 106 };
+    });
+
+    await expect(fetchAllListItems(app, 'list-1', { missingId: 'throw', maxPages: 10 }))
+      .resolves.toHaveLength(106);
+    expect(calls.map(c => c.arguments!.offset)).toEqual([0, 100, 0, 100]);
+  });
+
+  it('phat hien dong bi xoa qua so item khong khop total, roi doc lai', async () => {
+    // Hub bao tong 5 nhung chi tra ve 4 dong. `seenIds` mu truoc truong hop nay vi no chi bat
+    // duoc dong LAP, khong bat duoc dong THIEU — day la lo hong ma phep doi chieu total va lap.
+    let attempt = 0;
+    const { app } = createAppStub(() => {
+      attempt += 1;
+      return attempt === 1
+        ? { items: page(0, 4), total: 5 }
+        : { items: page(0, 5), total: 5 };
+    });
+
+    await expect(fetchAllListItems(app, 'list-1', { missingId: 'throw', maxPages: 10 }))
+      .resolves.toHaveLength(5);
+  });
+
+  it('nem loi khi list doi lien tuc qua moi luot doc lai', async () => {
+    const { app, calls } = createAppStub((offset) => (offset === 0
+      ? { items: page(0, 100), total: 107 }
+      : { items: page(100, 7), total: 106 }));
+
+    await expect(fetchAllListItems(app, 'list-1', { missingId: 'throw', maxPages: 10 }))
+      .rejects.toThrow(/thay đổi liên tục/);
+    // 3 luot doc, moi luot 2 trang: co tran cung, khong doc lai vo han.
+    expect(calls).toHaveLength(6);
+  });
+
+  it('khong bao lech gia khi item thieu id bi bo qua nhung van nam trong total', async () => {
+    // Voi missingId 'skip', item khong id khong vao mang ket qua nhung Hub van dem no trong
+    // total. Neu khong tinh rieng phan bi bo qua thi moi list co item hong se bi doc lai 3 lan
+    // roi nem loi — hong nang hon chinh loi dang sua.
+    const { app, calls } = createAppStub(() => ({
+      items: [{ name: 'Khong co id' }, { _id: 'item-1', name: 'Co id' }],
+      total: 2,
+    }));
+
+    const items = await fetchAllListItems(app, 'list-1', { missingId: 'skip', maxPages: 10 });
+    expect(items).toEqual([{ _id: 'item-1', name: 'Co id' }]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('khong doc lai khi loi la loi cung chu khong phai list bi doi', async () => {
+    // Hub bo qua offset la loi cung: doc lai chi nhan ba lan so request roi van hong y het.
+    const { app, calls } = createAppStub(() => ({ items: page(0, 100), total: 100 }));
+
+    await expect(fetchAllListItems(app, 'list-1', { missingId: 'throw', maxPages: 10 }))
+      .rejects.toThrow(/offset/i);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('khong doc lai khi total chi tang giua chung (them dong an toan duoi createdAt asc)', async () => {
+    // Duoi sortBy createdAt asc, mot dong THEM giua luc doc luon roi xuong cuoi, sau con tro
+    // hien tai - code cu tra ve dung du lieu cho truong hop nay. Chi tang total khong duoc coi
+    // la mutation, chi giam moi la dau hieu co dong bi XOA.
+    const { app, calls } = createAppStub((offset) => (offset === 0
+      ? { items: page(0, 100), total: 100 }
+      : { items: page(100, 5), total: 105 }));
+
+    await expect(fetchAllListItems(app, 'list-1', { missingId: 'throw', maxPages: 10 }))
+      .resolves.toHaveLength(105);
+    expect(calls).toHaveLength(2);
+  });
 });

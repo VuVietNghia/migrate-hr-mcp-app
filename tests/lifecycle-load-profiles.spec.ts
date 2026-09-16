@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PrivOSLifecycleService } from '../src/ui/lifecycle/services/PrivOSLifecycleService';
 
 type ToolCall = { name: string; arguments?: Record<string, unknown> };
@@ -382,5 +382,178 @@ describe('PrivOSLifecycleService khop ten field chinh xac', () => {
 
     const profile = (await service.loadProfiles('room-1'))[0] as Record<string, unknown>;
     expect(Object.values(profile)).not.toContain('khong duoc gan vao dau ca');
+  });
+});
+
+describe('PrivOSLifecycleService gan file dinh kem dung truong', () => {
+  const LIST_CO_TRUONG_LOAI_HO_SO = {
+    _id: 'list-1',
+    name: '[HR-MCP-App] Hồ sơ nhân sự',
+    fieldDefinitions: [
+      // Dat TRUOC truong DOCUMENT that. `.find()` duyet theo thu tu mang va chay ca predicate
+      // cho tung phan tu, nen mot predicate OR gop se chon dung truong nay.
+      { _id: 'fd-loai-ho-so', name: 'Loại hồ sơ', type: 'SELECT', options: [] },
+      { _id: 'fd-tep-dinh-kem', name: 'Hồ sơ đính kèm', type: 'DOCUMENT' },
+    ],
+    stages: STAGES,
+  };
+
+  function customFieldsOfCreateCall(calls: ToolCall[]) {
+    const createCall = calls.find(c => c.name === 'mcpapp.lists.createItem');
+    return createCall!.arguments!.customFields as Array<{ fieldId: string; value: unknown }>;
+  }
+
+  it('gan file vao truong DOCUMENT chu khong phai truong SELECT ten "Loai ho so"', async () => {
+    const { app, calls } = createAppStub({
+      'mcpapp.lists.getAll': () => [LIST_CO_TRUONG_LOAI_HO_SO],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.createItem': () => ({ _id: 'emp-moi' }),
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await service.createProfile('room-1', {
+      name: 'NV Moi',
+      attachedFileObj: { _id: 'file-1', downloadUrl: 'https://example.com/cv.pdf' },
+    } as never);
+
+    const customFields = customFieldsOfCreateCall(calls);
+    expect(customFields.find(f => Array.isArray(f.value))!.fieldId).toBe('fd-tep-dinh-kem');
+    expect(customFields.some(f => f.fieldId === 'fd-loai-ho-so')).toBe(false);
+  });
+
+  it('khong gan file vao truong chi chua chu "ho so" khi khong co truong DOCUMENT nao', async () => {
+    const { app, calls } = createAppStub({
+      'mcpapp.lists.getAll': () => [{
+        ...LIST_CO_TRUONG_LOAI_HO_SO,
+        fieldDefinitions: [{ _id: 'fd-loai-ho-so', name: 'Loại hồ sơ', type: 'SELECT', options: [] }],
+      }],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.createItem': () => ({ _id: 'emp-moi' }),
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await service.createProfile('room-1', {
+      name: 'NV Moi',
+      attachedFileObj: { _id: 'file-1' },
+    } as never);
+
+    expect(customFieldsOfCreateCall(calls).some(f => f.fieldId === 'fd-loai-ho-so')).toBe(false);
+  });
+
+  it('van gan duoc file qua bang alias khi truong khong khai bao type DOCUMENT', async () => {
+    const { app, calls } = createAppStub({
+      'mcpapp.lists.getAll': () => [{
+        ...LIST_CO_TRUONG_LOAI_HO_SO,
+        fieldDefinitions: [{ _id: 'fd-tai-lieu', name: 'Tài liệu', type: 'TEXT' }],
+      }],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.createItem': () => ({ _id: 'emp-moi' }),
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await service.createProfile('room-1', {
+      name: 'NV Moi',
+      attachedFileObj: { _id: 'file-1' },
+    } as never);
+
+    expect(customFieldsOfCreateCall(calls).find(f => Array.isArray(f.value))!.fieldId).toBe('fd-tai-lieu');
+  });
+});
+
+describe('PrivOSLifecycleService id local khi tao ho so that bai', () => {
+  it('sinh id khac nhau cho hai ho so tao trong cung mot mili-giay', async () => {
+    // Dong bang dong ho de hai lan goi chac chan roi vao cung mot mili-giay. Neu de thoi gian
+    // that chay, test se lúc pass lúc fail tuy toc do may — dung cai can tranh o day.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-16T00:00:00.000Z'));
+    try {
+      const { app } = createAppStub({
+        'mcpapp.lists.getAll': () => { throw new Error('hub khong phan hoi'); },
+      });
+      const service = new PrivOSLifecycleService(app as never);
+
+      const dau = await service.createProfile('room-1', { name: 'NV A' } as never);
+      const sau = await service.createProfile('room-1', { name: 'NV B' } as never);
+
+      expect(dau._id).not.toBe(sau._id);
+      expect(dau._id.startsWith('local-')).toBe(true);
+      expect(sau._id.startsWith('local-')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('PrivOSLifecycleService chi doc list SCREENING', () => {
+  const STAGE_05 = [{ _id: 'stage-05', name: '05_Moi_Phong_Van' }];
+
+  const SCREENING_LIST = {
+    _id: 'list-screening',
+    name: 'SCREENING_Backend_Developer',
+    stages: STAGE_05,
+    fieldDefinitions: [],
+  };
+
+  // List khong lien quan gi den tuyen dung, nhung ten cung khong chua tu khoa nhan su nao,
+  // nen logic loai tru cu xep no vao dien "list ung vien".
+  const UNRELATED_LIST = {
+    _id: 'list-khac',
+    name: 'Bảng theo dõi chi phí',
+    stages: STAGE_05,
+    fieldDefinitions: [],
+  };
+
+  const HR_LIFECYCLE_LIST = {
+    _id: 'list-nhan-su',
+    name: '[HR-MCP-App] Hồ sơ nhân sự',
+    stages: STAGE_05,
+    fieldDefinitions: [],
+  };
+
+  const CANDIDATE_ITEM = {
+    _id: 'ung-vien-1',
+    name: 'Nguyen Van A',
+    stageId: 'stage-05',
+    customFields: [],
+  };
+
+  it('khong doc item cua list khong phai SCREENING', async () => {
+    const { app, calls } = createAppStub({
+      'mcpapp.lists.getAll': () => [SCREENING_LIST, UNRELATED_LIST, HR_LIFECYCLE_LIST],
+      'mcpapp.lists.getItems': () => [CANDIDATE_ITEM],
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await service.loadPassedCandidates('room-1');
+
+    const itemCalls = calls.filter(c => c.name === 'mcpapp.lists.getItems');
+    expect(itemCalls.map(c => c.arguments!.listId)).toEqual(['list-screening']);
+  });
+
+  it('chi tra ve ung vien cua list SCREENING', async () => {
+    const { app } = createAppStub({
+      'mcpapp.lists.getAll': () => [SCREENING_LIST, UNRELATED_LIST],
+      'mcpapp.lists.getItems': () => [CANDIDATE_ITEM],
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    const candidates = await service.loadPassedCandidates('room-1');
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].listId).toBe('list-screening');
+    expect(candidates[0].listName).toBe('SCREENING_Backend_Developer');
+  });
+
+  it('tra ve rong khi room khong co list SCREENING nao', async () => {
+    const { app, calls } = createAppStub({
+      'mcpapp.lists.getAll': () => [UNRELATED_LIST, HR_LIFECYCLE_LIST],
+      // Van khai bao handler nay: neu bo qua, loi "unexpected tool call" se bi
+      // `loadPassedCandidates` nuot va tra ve [] — test se pass vi ly do sai.
+      'mcpapp.lists.getItems': () => [CANDIDATE_ITEM],
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await expect(service.loadPassedCandidates('room-1')).resolves.toEqual([]);
+    expect(calls.some(c => c.name === 'mcpapp.lists.getItems')).toBe(false);
   });
 });

@@ -88,12 +88,15 @@ export class PrivOSLifecycleService implements ILifecycleService {
         const debugLog: string[] = [];
 
         if (fileObjToSave) {
-          // Tìm trường có type là DOCUMENT hoặc tên chứa 'hồ sơ' / 'document'
-          const fileFieldDef = (list.fieldDefinitions || []).find((fd: any) =>
-            fd.type === 'DOCUMENT' ||
-            (fd.name || '').toLowerCase().includes('hồ sơ') ||
-            (fd.name || '').toLowerCase().includes('document')
-          );
+          // Hai lượt tách bạch, không gộp thành một predicate OR: `.find()` chạy cả predicate
+          // cho từng phần tử theo thứ tự mảng, nên gộp lại thì `type === 'DOCUMENT'` không hề
+          // được ưu tiên — một trường SELECT tên "Loại hồ sơ" đứng trước sẽ thắng và nuốt file.
+          // Lượt 2 khớp tên qua bảng alias chính xác thay vì `includes`, cùng lý do đã bỏ
+          // `includes` ở luồng đọc: "Loại hồ sơ" không nằm trong bảng nên bị loại đúng đắn.
+          const fieldDefs: any[] = list.fieldDefinitions || [];
+          const fileFieldDef =
+            fieldDefs.find((fd: any) => fd.type === 'DOCUMENT')
+            ?? fieldDefs.find((fd: any) => resolveProfileFieldKey(fd.name) === 'attachedFileObj');
           if (fileFieldDef) {
             customFields.push({ fieldId: fileFieldDef._id || fileFieldDef.id, value: [fileObjToSave] });
           }
@@ -184,7 +187,9 @@ export class PrivOSLifecycleService implements ILifecycleService {
   // --- Private Helper Methods ---
 
   private generateLocalId(): string {
-    return `local-${Date.now()}`;
+    // Hậu tố ngẫu nhiên là bắt buộc: hai hồ sơ tạo trong cùng một mili-giây (bấm hai lần nhanh,
+    // hoặc tạo liên tiếp khi Hub đang lỗi) sẽ nhận cùng `Date.now()` và trùng `_id`.
+    return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   private async ensureValidList(roomId: string): Promise<any> {
@@ -600,19 +605,17 @@ export class PrivOSLifecycleService implements ILifecycleService {
       .trim();
   }
 
+  /**
+   * Khớp khẳng định, không phải loại trừ. Bản cũ coi MỌI list không mang tên nhân sự là list
+   * ứng viên, nên một bảng bất kỳ trong room cũng bị đọc item mỗi nhịp polling, và item của nó
+   * lọt vào danh sách ứng viên đạt nếu stage tình cờ bắt đầu bằng 05.
+   *
+   * `SCREENING` là quy ước có thật: `pipeline-service.ts` tạo list với tên `SCREENING_<vị trí>`,
+   * và `CVScoredTab.tsx` lọc đúng bằng phép này. Giữ nguyên phân biệt hoa thường để khớp chính
+   * xác hai chỗ đó, không tạo thêm định nghĩa thứ ba.
+   */
   private isScreeningList(list: any): boolean {
-    const rawName = (list.name || '').toUpperCase();
-    const normalizedName = this.normalizeText(rawName);
-
-    // Explicitly exclude HR lifecycle lists
-    const isHrLifecycle =
-      normalizedName.includes('HO SO NHAN SU') ||
-      normalizedName.includes('NHAN SU') ||
-      normalizedName.includes('LIFECYCLE') ||
-      normalizedName.includes('EMPLOYEE');
-
-    // In a recruitment room, all other lists are candidate screening/recruitment lists
-    return !isHrLifecycle;
+    return (list.name || '').includes('SCREENING');
   }
 
   private isPassedCandidateItem(item: any, stages?: any[]): boolean {
