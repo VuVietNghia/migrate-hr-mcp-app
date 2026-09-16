@@ -16,6 +16,8 @@ type PayrollTabProps = Readonly<{
 export default function PayrollTab({ roomId, userRoles, active = false }: PayrollTabProps) {
   const app = usePrivosApp();
   const [schemaInitialized, setSchemaInitialized] = useState(false);
+  /** Why initialisation failed, so a failed `updateSchema` is not an eternal spinner. */
+  const [schemaError, setSchemaError] = useState<string | null>(null);
   const canMount = canMountPayroll({
     hasApp: app !== null,
     roomId,
@@ -39,6 +41,7 @@ export default function PayrollTab({ roomId, userRoles, active = false }: Payrol
 
   useEffect(() => {
     setSchemaInitialized(false);
+    setSchemaError(null);
     if (!payrollService) return;
 
     let cancelled = false;
@@ -52,6 +55,9 @@ export default function PayrollTab({ roomId, userRoles, active = false }: Payrol
       .catch(err => {
         if (!cancelled) {
           console.error("Failed to init Payroll schema", err);
+          // Without this the tab kept spinning on "Đang khởi tạo hệ thống Lương..." forever and the
+          // reason only ever reached the browser console.
+          setSchemaError(err instanceof Error ? err.message : String(err));
         }
       });
 
@@ -62,6 +68,15 @@ export default function PayrollTab({ roomId, userRoles, active = false }: Payrol
 
   if (!canMount) {
     return null;
+  }
+
+  if (schemaError) {
+    return (
+      <div className="p-4">
+        <p className="font-medium text-red-600">Không khởi tạo được hệ thống Lương.</p>
+        <p className="mt-1 text-sm text-gray-600">{schemaError}</p>
+      </div>
+    );
   }
 
   if (!payrollService || !lifecycleService || !payrollExportService || !schemaInitialized) {

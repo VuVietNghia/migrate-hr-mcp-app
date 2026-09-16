@@ -742,6 +742,20 @@
   color: #FFFFFF;
 }
 
+/* Nút mở JSON gốc từ Database: dùng tông accent thay vì hr-btn-subtle vì
+   subtle (nền/viền trong suốt, chữ text-muted) chìm vào cả nền Light lẫn Dark. */
+.payroll-debug-btn {
+  background: rgba(21, 111, 245, 0.1);
+  border-color: rgba(21, 111, 245, 0.2);
+  color: var(--accent, #156FF5);
+}
+
+.payroll-debug-btn:hover:not(:disabled) {
+  background: var(--accent, #156FF5);
+  border-color: var(--accent, #156FF5);
+  color: #FFFFFF;
+}
+
 /* Forms */
 .hr-form-panel {
   background: var(--bg-card, #FFFFFF);
@@ -855,6 +869,11 @@
 .hr-status-pill-warn {
   background: var(--status-warn-bg, rgba(217, 119, 6, 0.1));
   color: var(--status-warn, #D97706);
+}
+
+.hr-status-pill-resigned {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
 }
 
 /* Debug Modal / Panel */

@@ -1,11 +1,19 @@
 import { McpApp, parseToolResult } from '@privos_ai/app-react';
 import { EmployeeProfile, ILifecycleService, PassedCandidate } from '../types';
+import { fetchAllListItems, LIST_ITEMS_PAGE_SIZE } from '../../list-item-paging';
+import { resolveProfileFieldKey } from '../profile-field-aliases';
 
 export class PrivOSLifecycleService implements ILifecycleService {
   private static readonly SYSTEM_PREFIX = '[HR-MCP-App]';
   private static readonly LEGACY_EXACT_NAME = 'Hồ sơ nhân sự';
   private static readonly SYSTEM_CONFIG_NAME = '[Hệ thống] Không xoá - Cấu hình Kanban';
   private static readonly DEFAULT_STAGE = 'Mới nhận việc';
+
+  /** One `mcpapp.lists.getItems` page. The hub caps this at 100 (`tools_lists.md:270`). */
+  private static readonly ITEMS_PAGE_SIZE = LIST_ITEMS_PAGE_SIZE;
+
+  /** 100 × 100 = 10,000 items — the same ceiling `PAYROLL_MAX_PAGES` gives the payroll read. */
+  private static readonly ITEMS_MAX_PAGES = 100;
 
   constructor(private app: McpApp) { }
 
@@ -80,12 +88,15 @@ export class PrivOSLifecycleService implements ILifecycleService {
         const debugLog: string[] = [];
 
         if (fileObjToSave) {
-          // Tìm trường có type là DOCUMENT hoặc tên chứa 'hồ sơ' / 'document'
-          const fileFieldDef = (list.fieldDefinitions || []).find((fd: any) =>
-            fd.type === 'DOCUMENT' ||
-            (fd.name || '').toLowerCase().includes('hồ sơ') ||
-            (fd.name || '').toLowerCase().includes('document')
-          );
+          // Hai lượt tách bạch, không gộp thành một predicate OR: `.find()` chạy cả predicate
+          // cho từng phần tử theo thứ tự mảng, nên gộp lại thì `type === 'DOCUMENT'` không hề
+          // được ưu tiên — một trường SELECT tên "Loại hồ sơ" đứng trước sẽ thắng và nuốt file.
+          // Lượt 2 khớp tên qua bảng alias chính xác thay vì `includes`, cùng lý do đã bỏ
+          // `includes` ở luồng đọc: "Loại hồ sơ" không nằm trong bảng nên bị loại đúng đắn.
+          const fieldDefs: any[] = list.fieldDefinitions || [];
+          const fileFieldDef =
+            fieldDefs.find((fd: any) => fd.type === 'DOCUMENT')
+            ?? fieldDefs.find((fd: any) => resolveProfileFieldKey(fd.name) === 'attachedFileObj');
           if (fileFieldDef) {
             customFields.push({ fieldId: fileFieldDef._id || fileFieldDef.id, value: [fileObjToSave] });
           }
@@ -176,24 +187,15 @@ export class PrivOSLifecycleService implements ILifecycleService {
   // --- Private Helper Methods ---
 
   private generateLocalId(): string {
-    return `local-${Date.now()}`;
+    // Hậu tố ngẫu nhiên là bắt buộc: hai hồ sơ tạo trong cùng một mili-giây (bấm hai lần nhanh,
+    // hoặc tạo liên tiếp khi Hub đang lỗi) sẽ nhận cùng `Date.now()` và trùng `_id`.
+    return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  private async ensureValidList(roomId: string): Promise<any | null> {
-    console.log('[PrivOSLifecycleService] ensureValidList called for roomId:', roomId);
-    let list = await this.findExistingList(roomId);
-    console.log('[PrivOSLifecycleService] findExistingList result:', list ? 'found' : 'not found');
-
-    if (list) {
-      list = await this.enrichListWithStagesOrDelete(list);
-    }
-
-    if (!list) {
-      console.log('[PrivOSLifecycleService] Valid list not found, creating a new one...');
-      list = await this.createNewList(roomId);
-    }
-
-    return list;
+  private async ensureValidList(roomId: string): Promise<any> {
+    const existing = await this.findExistingList(roomId);
+    if (existing) return this.enrichListWithStages(existing);
+    return this.createNewList(roomId);
   }
 
   private async findExistingList(roomId: string): Promise<any | null> {
@@ -216,25 +218,75 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return foundList;
   }
 
-  private async enrichListWithStagesOrDelete(list: any): Promise<any | null> {
-    const configItem = await this.fetchSystemConfigItem(list._id || list.id);
+  /**
+   * Attach the Kanban stage config stored on the list's system config item.
+   *
+   * This NEVER deletes the list. It used to: a failed `JSON.parse` of the config item's
+   * description, or an empty stage array, dropped the entire employee roster and provisioned a
+   * fresh empty one. `PayrollDashboard` then reconciled every payroll row against that empty
+   * roster and deleted all of them. A corrupt stage config is a config problem; it is not a
+   * reason to destroy employee records or the salary rows that hang off them.
+   */
+  private async enrichListWithStages(list: any): Promise<any> {
+    const listId = list._id || list.id;
+    const configItem = await this.fetchSystemConfigItem(listId);
 
-    if (configItem && configItem.description) {
+    // A MISSING config item is repairable and must be repaired: `createNewList` only writes one
+    // when `mcpapp.lists.create` echoes stages back, so a room can legitimately have none — and
+    // such a room is exactly the one the removed delete-and-recreate loop used to "fix", so it is
+    // a likely real-world state. Throwing here would brick it permanently. A CORRUPT item is a
+    // different case and still throws below: unreadable data must not be guessed at.
+    if (!configItem) return this.repairMissingStageConfig(list, listId);
+
+    if (configItem.description) {
       try {
         list.stages = JSON.parse(configItem.description);
-      } catch (e) {
-        console.warn('Failed to parse config item description');
+      } catch (error) {
+        throw new Error(
+          `Cấu hình Kanban của danh sách hồ sơ nhân sự (${listId}) không đọc được: ${(error as Error).message}. `
+          + 'Sửa lại item "[Hệ thống] Không xoá - Cấu hình Kanban" trong Room. Danh sách hồ sơ được giữ nguyên.'
+        );
       }
     }
 
-    if (this.isValidStagesArray(list.stages)) {
-      return list;
+    if (!this.isValidStagesArray(list.stages)) {
+      throw new Error(
+        `Danh sách hồ sơ nhân sự (${listId}) không có stage nào. `
+        + 'Khôi phục item "[Hệ thống] Không xoá - Cấu hình Kanban" trong Room. Danh sách hồ sơ được giữ nguyên.'
+      );
     }
 
-    // List is corrupted or missing stages config -> delete and return null to trigger recreation
-    console.log('[PrivOSLifecycleService] List is old/corrupted (no stages). Deleting to clean up...');
-    await this.deleteList(list._id || list.id);
-    return null;
+    return list;
+  }
+
+  /**
+   * Rebuild the stage config for a list that has no system config item at all.
+   *
+   * Stages are recovered from the list itself first, then from `mcpapp.stages.getByList`; if either
+   * yields some, the config item is written back so the next load is clean. Only a list with no
+   * stages available from ANY source throws. NOTHING is deleted on any path — that is the binding
+   * requirement this whole change exists to hold, and a re-create failure is not allowed to turn a
+   * readable roster into an outage either, so it only warns.
+   */
+  private async repairMissingStageConfig(list: any, listId: string): Promise<any> {
+    if (!this.isValidStagesArray(list.stages)) {
+      list.stages = await this.fetchListStages(listId);
+    }
+
+    if (!this.isValidStagesArray(list.stages)) {
+      throw new Error(
+        `Danh sách hồ sơ nhân sự (${listId}) không có stage nào và không khôi phục được từ đâu. `
+        + 'Khôi phục item "[Hệ thống] Không xoá - Cấu hình Kanban" trong Room. Danh sách hồ sơ được giữ nguyên.'
+      );
+    }
+
+    try {
+      await this.createSystemConfigItem(listId, list.stages);
+    } catch (error) {
+      console.warn(`[PrivOSLifecycleService] Could not re-create the Kanban config item for list ${listId}:`, error);
+    }
+
+    return list;
   }
 
   private isValidStagesArray(stages: any): boolean {
@@ -253,13 +305,6 @@ export class PrivOSLifecycleService implements ILifecycleService {
 
   private isSystemConfigItem(item: any): boolean {
     return (item.name || item.title || '').includes('[Hệ thống]');
-  }
-
-  private async deleteList(listId: string): Promise<void> {
-    await this.app.callServerTool({
-      name: 'mcpapp.lists.deleteMany',
-      arguments: { listIds: [listId] }
-    });
   }
 
   private async createNewList(roomId: string): Promise<any | null> {
@@ -319,14 +364,24 @@ export class PrivOSLifecycleService implements ILifecycleService {
     ];
   }
 
+  /**
+   * Read EVERY item of a list.
+   *
+   * This used to send a bare `count: 100` and return whatever came back. `PayrollDashboard`
+   * treats any employee missing from this roster as an orphan and deletes their payroll row, so
+   * a silently truncated read at employee 101 destroyed real salary data.
+   *
+   * `missingId: 'throw'` because `mapItemToProfile` gives an id-less item `_id: undefined`, and
+   * the payroll GC reconciles on exactly that `_id` — a roster carrying anonymous items makes the
+   * GC tombstone the wrong salary row. Returning a partial roster is the failure mode this method
+   * exists to prevent, so it is never the fallback.
+   */
   private async fetchListItems(listId: string): Promise<any[]> {
-    const res: any = await this.app.callServerTool({
-      name: 'mcpapp.lists.getItems',
-      arguments: { listId, count: 100 }
+    return fetchAllListItems(this.app, listId, {
+      missingId: 'throw',
+      maxPages: PrivOSLifecycleService.ITEMS_MAX_PAGES,
+      pageSize: PrivOSLifecycleService.ITEMS_PAGE_SIZE,
     });
-
-    const parsed: any = parseToolResult(res);
-    return Array.isArray(parsed) ? parsed : (parsed?.items || []);
   }
 
   private createFieldDefinitionMap(fieldDefinitions: any[] | undefined): Map<string, any> {
@@ -389,18 +444,14 @@ export class PrivOSLifecycleService implements ILifecycleService {
     else if (typeof item.status === 'string' && isValidStatus(item.status)) resolvedStatus = item.status;
     else if (item.stage?.name && isValidStatus(item.stage.name)) resolvedStatus = item.stage.name;
     
-    console.warn(`[PrivOSLifecycleService] Item ${item._id} mapped to status: "${resolvedStatus}". Raw item info:`, { stageId, stage: item.stage, status: item.status, stages });
-    
-    // Also send log to backend IDE terminal
-    try {
-      this.app.callServerTool({
-        name: 'debug_log',
-        arguments: {
-          message: `Item ${item._id} mapped to status: "${resolvedStatus}"`,
-          data: { stageId, stage: item.stage, status: item.status, stages }
-        }
-      }).catch(err => console.error("Failed to send debug log", err));
-    } catch(e) {}
+    // `stages` is identical for every item in the list, so it is left out: logging it once per
+    // item buried the one field that differs. The `debug_log` tool call that used to sit here was
+    // removed — no such tool is registered anywhere, so it was one failed relay round-trip per
+    // unmatched item, swallowed by its own `.catch`.
+    console.warn(
+      `[PrivOSLifecycleService] Item ${item._id} mapped to status: "${resolvedStatus}"`,
+      { stageId, stage: item.stage, status: item.status },
+    );
 
     return resolvedStatus;
   }
@@ -429,15 +480,24 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return rawValue;
   }
 
+  /**
+   * `profile` is built up field by field from room-defined custom fields, so it is `any` until
+   * it is cast to `EmployeeProfile` at the end of `mapItemToProfile`.
+   */
   private assignProfileFieldByName(profile: any, fieldName: string, value: any): void {
-    const fname = fieldName.toLowerCase();
+    const key = resolveProfileFieldKey(fieldName);
+    if (!key) return;
 
-    if (fname.includes('thoại') || fname.includes('phone')) profile.phone = value;
-    else if (fname.includes('email')) profile.email = value;
-    else if (fname.includes('vị trí') || fname.includes('position')) profile.position = value;
-    else if (fname.includes('phòng')) profile.department = value;
-    else if (fname.includes('ngày') || fname.includes('date')) profile.startDate = value;
-    else if (fname.includes('hồ sơ') || fname.includes('document')) profile.attachedFileObj = Array.isArray(value) ? value[0] : value;
+    switch (key) {
+      case 'phone': profile.phone = value; return;
+      case 'email': profile.email = value; return;
+      case 'position': profile.position = value; return;
+      case 'department': profile.department = value; return;
+      case 'startDate': profile.startDate = value; return;
+      case 'attachedFileObj':
+        profile.attachedFileObj = Array.isArray(value) ? value[0] : value;
+        return;
+    }
   }
 
   private buildCustomFieldsForCreation(data: Omit<EmployeeProfile, '_id' | 'status'>, fieldDefinitions: any[] | undefined): any[] {
@@ -457,14 +517,25 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return customFields;
   }
 
+  /**
+   * `fieldName` comes from a room-defined field definition, so it is the untyped side here.
+   * `data` is `Omit<EmployeeProfile, '_id' | 'status'>` at the only call site
+   * (`buildCustomFieldsForCreation`); the `any` is kept only so the two private helpers in this
+   * class keep a matching shape, not because the payload is dynamic.
+   */
   private getProfileValueByFieldName(data: any, fieldName: string): any {
-    const fname = fieldName.toLowerCase();
-    if (fname.includes('thoại') || fname.includes('phone')) return data.phone;
-    if (fname.includes('email')) return data.email;
-    if (fname.includes('vị trí') || fname.includes('position')) return data.position;
-    if (fname.includes('phòng')) return data.department;
-    if (fname.includes('ngày') || fname.includes('date')) return data.startDate;
-    return undefined;
+    const key = resolveProfileFieldKey(fieldName);
+    if (!key) return undefined;
+
+    switch (key) {
+      case 'phone': return data.phone;
+      case 'email': return data.email;
+      case 'position': return data.position;
+      case 'department': return data.department;
+      case 'startDate': return data.startDate;
+      // Tệp hồ sơ đi qua mcpapp.files rồi gắn vào description, không ghi thành custom field.
+      case 'attachedFileObj': return undefined;
+    }
   }
 
   private getRawValueForField(fd: any, displayValue: any): any {
@@ -534,19 +605,17 @@ export class PrivOSLifecycleService implements ILifecycleService {
       .trim();
   }
 
+  /**
+   * Khớp khẳng định, không phải loại trừ. Bản cũ coi MỌI list không mang tên nhân sự là list
+   * ứng viên, nên một bảng bất kỳ trong room cũng bị đọc item mỗi nhịp polling, và item của nó
+   * lọt vào danh sách ứng viên đạt nếu stage tình cờ bắt đầu bằng 05.
+   *
+   * `SCREENING` là quy ước có thật: `pipeline-service.ts` tạo list với tên `SCREENING_<vị trí>`,
+   * và `CVScoredTab.tsx` lọc đúng bằng phép này. Giữ nguyên phân biệt hoa thường để khớp chính
+   * xác hai chỗ đó, không tạo thêm định nghĩa thứ ba.
+   */
   private isScreeningList(list: any): boolean {
-    const rawName = (list.name || '').toUpperCase();
-    const normalizedName = this.normalizeText(rawName);
-
-    // Explicitly exclude HR lifecycle lists
-    const isHrLifecycle =
-      normalizedName.includes('HO SO NHAN SU') ||
-      normalizedName.includes('NHAN SU') ||
-      normalizedName.includes('LIFECYCLE') ||
-      normalizedName.includes('EMPLOYEE');
-
-    // In a recruitment room, all other lists are candidate screening/recruitment lists
-    return !isHrLifecycle;
+    return (list.name || '').includes('SCREENING');
   }
 
   private isPassedCandidateItem(item: any, stages?: any[]): boolean {

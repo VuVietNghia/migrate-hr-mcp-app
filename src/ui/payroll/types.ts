@@ -14,6 +14,8 @@ export interface PayrollRecord {
   readonly roomId?: string;
   _createdAt?: string; // Do App Database gán khi tạo bản ghi
   _updatedAt?: string; // Do App Database gán khi cập nhật bản ghi
+  /** Soft-delete tombstone — see `isLivePayrollRecord` in `services/payroll/payroll-schema.ts`. */
+  readonly deletedAt?: string;
 }
 
 export interface IPayrollService {

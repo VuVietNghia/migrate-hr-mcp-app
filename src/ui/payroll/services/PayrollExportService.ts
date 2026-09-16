@@ -3,6 +3,7 @@ import type { McpApp } from '@privos_ai/app-react';
 import type { EmployeeProfile } from '../../lifecycle/types';
 import type { PayrollRecord } from '../types';
 import { calculateNetSalary } from '../utils';
+import { isResignedStatus } from '../payroll-selectors';
 import { ensureFolderPath } from '../../privos-rest';
 
 export type PayrollExportFormat = 'csv' | 'xlsx';
@@ -44,6 +45,7 @@ interface PayrollExportRow {
   taxId: string;
   bankName: string;
   bankAccount: string;
+  employmentStatus: string;
 }
 
 const EXPORT_FOLDER = ['hr-miniapp', 'payroll', 'exports'];
@@ -60,6 +62,7 @@ const EXPORT_HEADERS: string[] = [
   'Mã số thuế',
   'Ngân hàng',
   'Số tài khoản',
+  'Trạng thái làm việc',
 ];
 
 export class PayrollExportService implements IPayrollExportService {
@@ -140,6 +143,7 @@ export class PayrollExportService implements IPayrollExportService {
         taxId: payroll?.taxId ?? '',
         bankName: payroll?.bankName ?? '',
         bankAccount: payroll?.bankAccount ?? '',
+        employmentStatus: isResignedStatus(employee.status) ? 'Đã nghỉ việc' : 'Đang làm việc',
       };
     });
   }
@@ -160,6 +164,7 @@ export class PayrollExportService implements IPayrollExportService {
       row.taxId,
       row.bankName,
       row.bankAccount,
+      row.employmentStatus,
     ]);
     const csv = `\uFEFF${[EXPORT_HEADERS, ...cells]
       .map((row) => row.map((cell) => this.escapeCsvCell(cell)).join(','))
@@ -181,11 +186,13 @@ export class PayrollExportService implements IPayrollExportService {
         row.taxId,
         row.bankName,
         row.bankAccount,
+        row.employmentStatus,
       ]),
     ]);
     sheet['!cols'] = [
       { wch: 24 }, { wch: 22 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
       { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 18 }, { wch: 18 },
+      { wch: 18 },
     ];
     this.applyExcelNumberFormats(sheet, rows.length);
 
