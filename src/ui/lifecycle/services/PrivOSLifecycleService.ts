@@ -380,7 +380,11 @@ export class PrivOSLifecycleService implements ILifecycleService {
         roomId,
         name: `${PrivOSLifecycleService.SYSTEM_PREFIX} Hồ sơ nhân sự`,
         fieldDefinitions: this.getInitialFieldDefinitions(),
-        stages: this.getInitialStages()
+        stages: this.getInitialStages(),
+        // Hub từ chối list do app tạo nếu thiếu cờ này:
+        // "App-owned lists must be isolated and cannot be cross-team".
+        isolatedList: true,
+        crossTeamWorkflow: false,
       }
     });
 

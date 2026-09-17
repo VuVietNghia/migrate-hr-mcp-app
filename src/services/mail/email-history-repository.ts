@@ -275,6 +275,10 @@ export class EmailHistoryRepository {
       description: 'Lịch sử email dùng chung của HR Mini App. Không xóa List này.',
       fieldDefinitions: FIELD_DEFINITIONS,
       stages: STAGE_DEFINITIONS,
+      // Hub từ chối list do app tạo nếu thiếu cờ này:
+      // "App-owned lists must be isolated and cannot be cross-team".
+      isolatedList: true,
+      crossTeamWorkflow: false,
     }));
     const list = created?.list || created;
     const listId = getListId(list);

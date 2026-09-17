@@ -1099,6 +1099,10 @@ ${content}
             description: `Kết quả chấm CV theo JD: ${jdName || 'Không xác định'}`,
             fieldDefinitions,
             stages,
+            // Hub từ chối list do app tạo nếu thiếu cờ này:
+            // "App-owned lists must be isolated and cannot be cross-team".
+            isolatedList: true,
+            crossTeamWorkflow: false,
           }
         }));
 
