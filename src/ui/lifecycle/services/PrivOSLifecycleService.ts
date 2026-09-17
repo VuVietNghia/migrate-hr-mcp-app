@@ -2,6 +2,7 @@ import { McpApp, parseToolResult } from '@privos_ai/app-react';
 import { EmployeeProfile, ILifecycleService, PassedCandidate, UpdateProfileFieldsInput } from '../types';
 import { fetchAllListItems, LIST_ITEMS_PAGE_SIZE } from '../../list-item-paging';
 import { resolveProfileFieldKey } from '../profile-field-aliases';
+import { parseCandidateName, positionFromScreeningListName } from '../passed-candidate-parsing';
 
 export class PrivOSLifecycleService implements ILifecycleService {
   private static readonly SYSTEM_PREFIX = '[HR-MCP-App]';
@@ -756,8 +757,7 @@ export class PrivOSLifecycleService implements ILifecycleService {
   }
 
   private mapItemToPassedCandidate(item: any, list: any): PassedCandidate {
-    const rawTitle = item.name || item.title || 'Không có tên';
-    const parsedNameInfo = this.cleanCandidateName(rawTitle);
+    const rawTitle = item.name || item.title || '';
     const scoreVal = this.extractFieldValue(item.customFields, ['tong_diem', 'điểm', 'score', 'diem']);
     const categoryVal = this.extractFieldValue(item.customFields, ['phan_loai', 'loại', 'category', 'ket_qua']);
     const reasonVal = this.extractFieldValue(item.customFields, ['ly_do', 'lý do', 'reason', 'nhan_xet']);
@@ -766,14 +766,15 @@ export class PrivOSLifecycleService implements ILifecycleService {
 
     return {
       _id: item._id || item.id,
-      name: parsedNameInfo.name,
+      name: parseCandidateName(rawTitle),
       listName: list.name || 'Screening List',
       listId: list._id || list.id,
       score: typeof scoreVal === 'number' ? scoreVal : (scoreVal ? Number(scoreVal) : undefined),
       category: categoryVal ? String(categoryVal) : undefined,
       stageName: this.getStageName(item, list.stages || []),
       reason: reasonVal ? String(reasonVal) : (item.description || undefined),
-      position: parsedNameInfo.position,
+      // Tên file CV chỉ chứa họ tên; vị trí ứng tuyển nằm ở tên list JD.
+      position: positionFromScreeningListName(list.name || ''),
       email: emailVal ? String(emailVal).trim() : undefined,
       phone: phoneVal ? String(phoneVal).trim() : undefined,
     };
@@ -799,36 +800,4 @@ export class PrivOSLifecycleService implements ILifecycleService {
     return undefined;
   }
 
-  private cleanCandidateName(rawTitle: string): { name: string, position?: string } {
-    let title = rawTitle.replace(/\.(md|pdf)$/i, '').trim();
-    // Remove date prefix like 2026-07-06_ or 2026_07_06_
-    title = title.replace(/^\d{4}[-_]\d{2}[-_]\d{2}_?/i, '');
-    // Remove CV_ or CV- prefix
-    title = title.replace(/^CV[-_]?/i, '');
-
-    // Split by _ or - to extract position if present (e.g. "NguyenVanA_Developer")
-    const parts = title.split(/[-_]/).filter(Boolean);
-    if (parts.length >= 2) {
-      const candidateName = parts[0].replace(/([A-Z])/g, ' $1').trim();
-      const rawPos = parts.slice(1).join(' ').replace(/([A-Z])/g, ' $1').trim();
-      return {
-        name: candidateName || parts[0],
-        position: this.normalizePosition(rawPos)
-      };
-    }
-
-    return { name: title };
-  }
-
-  private normalizePosition(rawPosition: string): string {
-    const pos = rawPosition.toLowerCase();
-    if (pos.includes('dev') || pos.includes('lap trinh') || pos.includes('developer')) return 'Developer';
-    if (pos.includes('test') || pos.includes('qa') || pos.includes('kiem thu')) return 'Tester';
-    if (pos.includes('design') || pos.includes('ui') || pos.includes('ux')) return 'Designer';
-    if (pos.includes('product') || pos.includes('pm')) return 'Product Manager';
-    if (pos.includes('hr') || pos.includes('nhan su') || pos.includes('recruiter')) return 'HR';
-    if (pos.includes('sale') || pos.includes('kinh doanh')) return 'Sales';
-    if (pos.includes('market')) return 'Marketing';
-    return rawPosition;
-  }
 }

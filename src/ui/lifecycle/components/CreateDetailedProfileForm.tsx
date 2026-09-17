@@ -14,7 +14,7 @@ import { ensureFolderPath, createOrUpdateFile } from '../../privos-rest';
 import employeeTemplateRaw from '../../data/employee_template.md?raw';
 import { renderEmployeeMd } from '../employee-md-document';
 import { PHONE_REGEX } from '../profile-validation';
-import { DEPARTMENT_OPTIONS, POSITION_OPTIONS } from '../profile-form-options';
+import { DEPARTMENT_OPTIONS, POSITION_OPTIONS, withCurrentOption } from '../profile-form-options';
 import { isValidEmailAddress } from '../../utils/email-validation';
 
 interface CreateDetailedProfileFormProps {
@@ -369,7 +369,7 @@ export function CreateDetailedProfileForm({
           <div>
             <label className="hr-label">Vị trí công việc <span style={{ color: '#EC0D2A' }}>*</span></label>
             <select className="hr-input" name="position" value={formData.position} onChange={handleChange} disabled={isSubmitting || isSuccess}>
-              {POSITION_OPTIONS.map(option => (
+              {withCurrentOption(POSITION_OPTIONS, formData.position).map(option => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
