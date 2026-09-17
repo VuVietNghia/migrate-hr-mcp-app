@@ -3,6 +3,10 @@ import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { EmployeeProfile, PassedCandidate } from '../types';
 import { ensureFolderPath, createOrUpdateFile } from '../../privos-rest';
 import employeeTemplateRaw from '../../data/employee_template.md?raw';
+import { renderEmployeeMd } from '../employee-md-document';
+import { PHONE_REGEX } from '../profile-validation';
+import { DEPARTMENT_OPTIONS, POSITION_OPTIONS } from '../profile-form-options';
+import { isValidEmailAddress } from '../../utils/email-validation';
 
 interface CreateDetailedProfileFormProps {
   onSubmit: (data: Omit<EmployeeProfile, '_id' | 'status'> & { attachedFileObj?: any }) => Promise<void>;
@@ -10,9 +14,6 @@ interface CreateDetailedProfileFormProps {
   passedCandidates?: PassedCandidate[];
   isLoadingCandidates?: boolean;
 }
-
-const PHONE_REGEX = /^\+?[0-9\s\-().]{8,20}$/;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function getDepartmentForPosition(position: string): string {
   const pos = position.toLowerCase();
@@ -169,7 +170,7 @@ export function CreateDetailedProfileForm({
       setErrorMsg('Số điện thoại không hợp lệ (hỗ trợ số di động, cố định hoặc quốc tế có +).');
       return;
     }
-    if (trimmedEmail && !EMAIL_REGEX.test(trimmedEmail)) {
+    if (trimmedEmail && !isValidEmailAddress(trimmedEmail)) {
       setErrorMsg('Email không đúng định dạng (VD: an.nguyen@company.com).');
       return;
     }
@@ -212,32 +213,36 @@ export function CreateDetailedProfileForm({
       addLog(`Hoàn tất bước ảnh. Bắt đầu tạo file Markdown...`);
 
       // 3. Generate Markdown content
-      let mdContent = employeeTemplateRaw;
-      mdContent = mdContent.replace('[LOCAL_ID]', `NV${Date.now().toString().slice(-6)}`);
-      mdContent = mdContent.replace('[CREATE_DATE]', new Date().toLocaleDateString('vi-VN'));
-      mdContent = mdContent.replace('[FULL_NAME]', trimmedName);
-      mdContent = mdContent.replace('[POSITION]', formData.position);
-      mdContent = mdContent.replace('[DEPARTMENT]', formData.department);
-      mdContent = mdContent.replace('[START_DATE]', formData.onboardingDate);
-      mdContent = mdContent.replace('[PHONE]', trimmedPhone);
-      mdContent = mdContent.replace('[EMAIL]', trimmedEmail);
-      mdContent = mdContent.replace('[TELEGRAM]', formData.telegram);
-      mdContent = mdContent.replace('[EMERGENCY]', formData.emergencyContact);
-      mdContent = mdContent.replace('[DOB]', formData.dob);
-      mdContent = mdContent.replace('[ID_NUMBER]', formData.idNumber);
-      mdContent = mdContent.replace('[ID_DATE]', formData.idIssueDate);
-      mdContent = mdContent.replace('[ID_PLACE]', formData.idIssuePlace);
-      mdContent = mdContent.replace('[PERM_ADDRESS]', formData.permanentAddress);
-      mdContent = mdContent.replace('[CUR_ADDRESS]', formData.currentAddress);
-      mdContent = mdContent.replace('[BANK_ACCOUNT]', formData.bankAccount);
-      mdContent = mdContent.replace('[BANK_NAME]', formData.bankName);
-      mdContent = mdContent.replace('[TAX_CODE]', formData.taxCode);
-      mdContent = mdContent.replace('[SOCIAL_INSURANCE]', formData.socialInsurance);
-      mdContent = mdContent.replace('[VEHICLE_TYPE]', formData.vehicleType);
-      mdContent = mdContent.replace('[VEHICLE_PLATE]', formData.vehiclePlate);
-      
-      let imgLinkStr = idPhoto ? `*Ảnh thẻ và các tài liệu liên quan được lưu trữ cùng thư mục với hồ sơ này.*` : '*Chưa có ảnh đính kèm*';
-      mdContent = mdContent.replace('[IMAGE_LINK]', imgLinkStr);
+      // Dùng chung renderer với form sửa để hai bên không bao giờ sinh ra hai định
+      // dạng khác nhau, và để giá trị chứa `$&` hay `$1` không bị `String.replace`
+      // diễn giải thành pattern thay thế.
+      const mdContent = renderEmployeeMd({
+        localId: `NV${Date.now().toString().slice(-6)}`,
+        createDate: new Date().toLocaleDateString('vi-VN'),
+        fullName: trimmedName,
+        position: formData.position,
+        department: formData.department,
+        startDate: formData.onboardingDate,
+        phone: trimmedPhone,
+        email: trimmedEmail,
+        telegram: formData.telegram,
+        emergency: formData.emergencyContact,
+        dob: formData.dob,
+        idNumber: formData.idNumber,
+        idDate: formData.idIssueDate,
+        idPlace: formData.idIssuePlace,
+        permAddress: formData.permanentAddress,
+        curAddress: formData.currentAddress,
+        bankAccount: formData.bankAccount,
+        bankName: formData.bankName,
+        taxCode: formData.taxCode,
+        socialInsurance: formData.socialInsurance,
+        vehicleType: formData.vehicleType,
+        vehiclePlate: formData.vehiclePlate,
+        imageLink: idPhoto
+          ? '*Ảnh thẻ và các tài liệu liên quan được lưu trữ cùng thư mục với hồ sơ này.*'
+          : '*Chưa có ảnh đính kèm*',
+      }, employeeTemplateRaw);
 
       // 4. Upload Markdown file locally (hr-miniapp local folder)
       const mdFileName = `${new Date().toISOString().split('T')[0]}_PROFILE_${safeName}.md`;
@@ -354,22 +359,17 @@ export function CreateDetailedProfileForm({
           <div>
             <label className="hr-label">Vị trí công việc <span style={{ color: '#EC0D2A' }}>*</span></label>
             <select className="hr-input" name="position" value={formData.position} onChange={handleChange} disabled={isSubmitting || isSuccess}>
-              <option value="Developer">Developer</option>
-              <option value="Tester">Tester / QA</option>
-              <option value="Designer">UI/UX Designer</option>
-              <option value="Product Manager">Product Manager</option>
-              <option value="HR">HR Specialist</option>
-              <option value="Sales">Sales Executive</option>
-              <option value="Marketing">Marketing Specialist</option>
+              {POSITION_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </div>
           <div>
             <label className="hr-label">Phòng ban</label>
             <select className="hr-input" name="department" value={formData.department} onChange={handleChange} disabled={isSubmitting || isSuccess}>
-              <option value="IT">Kỹ thuật (IT / R&D)</option>
-              <option value="Business">Kinh doanh (Business / Sales)</option>
-              <option value="Marketing">Truyền thông (Marketing)</option>
-              <option value="Back-office">Khối văn phòng (HR / Admin)</option>
+              {DEPARTMENT_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </div>
           <div>

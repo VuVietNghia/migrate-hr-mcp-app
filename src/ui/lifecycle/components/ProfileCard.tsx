@@ -3,6 +3,8 @@ import { usePrivosContext } from '@privos_ai/app-react';
 import { EmployeeProfile, KANBAN_COLUMNS } from '../types';
 import { getInitials, calculateTimelineInfo } from '../utils';
 import { EmailComposerModal } from './EmailComposerModal';
+import { EditProfileModal } from './EditProfileModal';
+import { canWriteEmployeeMd, resolveEmployeeMdFileRef } from '../services/employee-md-file';
 
 interface ProfileCardProps {
   profile: EmployeeProfile;
@@ -13,6 +15,10 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  // Không có file Markdown thì không có gì để đọc vào form, nên khoá nút thay vì mở
+  // một form trống — lưu form trống sẽ ghi đè sạch file.
+  const canEditMd = canWriteEmployeeMd(resolveEmployeeMdFileRef(profile));
   const { roomId } = usePrivosContext();
 
   const getFileUrl = (p: EmployeeProfile) => {
@@ -220,6 +226,22 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
         </div>
       )}
 
+      {canEditMd && (
+        <div className="detail-row" style={{ justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className="hr-icon-btn"
+            title="Sửa thông tin trong file hồ sơ"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsEditModalOpen(true);
+            }}
+          >
+            Sửa
+          </button>
+        </div>
+      )}
+
       {onMoveProfile && (prevColumn || nextColumn) && (
         <div className="hr-card-quick-actions">
           {prevColumn && (
@@ -252,11 +274,15 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
       )}
     </div>
 
-    <EmailComposerModal 
-        isOpen={isEmailModalOpen} 
-        onClose={() => setIsEmailModalOpen(false)} 
-        profile={profile} 
+    <EmailComposerModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+        profile={profile}
       />
+
+    {isEditModalOpen && (
+      <EditProfileModal profile={profile} onClose={() => setIsEditModalOpen(false)} />
+    )}
     </>
   );
 }

@@ -3,6 +3,8 @@ import { usePrivosContext } from '@privos_ai/app-react';
 import { EmployeeProfile, KANBAN_COLUMNS } from '../types';
 import { getInitials, calculateTimelineInfo } from '../utils';
 import { EmailComposerModal } from './EmailComposerModal';
+import { EditProfileModal } from './EditProfileModal';
+import { canWriteEmployeeMd, resolveEmployeeMdFileRef } from '../services/employee-md-file';
 
 interface ProfileListViewProps {
   profiles: EmployeeProfile[];
@@ -13,6 +15,7 @@ interface ProfileListViewProps {
 export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileListViewProps) {
   const [copiedField, setCopiedField] = useState<{ id: string; field: string } | null>(null);
   const [emailProfile, setEmailProfile] = useState<EmployeeProfile | null>(null);
+  const [editProfile, setEditProfile] = useState<EmployeeProfile | null>(null);
   const { roomId } = usePrivosContext();
 
   const copyToClipboard = (id: string, text: string, field: string) => {
@@ -228,6 +231,16 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
                 {/* Action buttons */}
                 <td style={{ textAlign: 'right' }}>
                   <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                    {canWriteEmployeeMd(resolveEmployeeMdFileRef(profile)) && (
+                      <button
+                        type="button"
+                        className="hr-btn-mini"
+                        onClick={() => setEditProfile(profile)}
+                        title="Sửa thông tin trong file hồ sơ"
+                      >
+                        Sửa
+                      </button>
+                    )}
                     {nextColumn && onMoveProfile && (
                       <button
                         type="button"
@@ -247,11 +260,15 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
       </table>
       
       {emailProfile && (
-        <EmailComposerModal 
-          isOpen={true} 
-          onClose={() => setEmailProfile(null)} 
-          profile={emailProfile} 
+        <EmailComposerModal
+          isOpen={true}
+          onClose={() => setEmailProfile(null)}
+          profile={emailProfile}
         />
+      )}
+
+      {editProfile && (
+        <EditProfileModal profile={editProfile} onClose={() => setEditProfile(null)} />
       )}
     </div>
   );

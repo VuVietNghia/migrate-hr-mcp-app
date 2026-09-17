@@ -1,5 +1,5 @@
 import { McpApp, parseToolResult } from '@privos_ai/app-react';
-import { EmployeeProfile, ILifecycleService, PassedCandidate } from '../types';
+import { EmployeeProfile, ILifecycleService, PassedCandidate, UpdateProfileFieldsInput } from '../types';
 import { fetchAllListItems, LIST_ITEMS_PAGE_SIZE } from '../../list-item-paging';
 import { resolveProfileFieldKey } from '../profile-field-aliases';
 
@@ -182,6 +182,72 @@ export class PrivOSLifecycleService implements ILifecycleService {
       console.error('[PrivOSLifecycleService] Failed to move profile to stage:', err);
       throw err;
     }
+  }
+
+  /**
+   * Đồng bộ các trường của một hồ sơ ngược vào item trong list, sau khi file Markdown
+   * đã được ghi xong.
+   *
+   * `customFields` luôn gửi mảng ĐẦY ĐỦ dựng từ toàn bộ `fieldDefinitions`: tài liệu
+   * chỉ nói đó là "New custom field values" (`room-scoped-apis/items.md:213`) mà không
+   * nói merge hay replace, nên gửi đủ là cách duy nhất đúng với cả hai nghĩa.
+   *
+   * `description` bị `updateItem` thay nguyên khối, mà nó đang chứa cả marker ứng viên
+   * nguồn lẫn marker file. Ghi đè mù sẽ cắt đứt hai liên kết đó, nên phải dựng lại. Phần chữ
+   * HR tự gõ trong description (`existingDescription` bỏ marker) được nối lại ở cuối.
+   *
+   * Không nuốt lỗi: người gọi cần phân biệt được "đã ghi file xong nhưng thẻ chưa cập
+   * nhật" với "hỏng hoàn toàn".
+   */
+  async updateProfileFields(
+    roomId: string,
+    profileId: string,
+    data: UpdateProfileFieldsInput,
+  ): Promise<void> {
+    const list = await this.ensureValidList(roomId);
+    if (!list || !(list._id || list.id)) {
+      throw new Error(`Không lấy được danh sách hồ sơ nhân sự hợp lệ của room ${roomId}.`);
+    }
+
+    const customFields = this.buildCustomFieldsForUpdate(data, list.fieldDefinitions);
+
+    const descriptionParts: string[] = [];
+    if (data.sourceCandidateId) {
+      descriptionParts.push(`[sourceCandidateId:${data.sourceCandidateId}]`);
+    }
+    if (data.attachedFileId) {
+      descriptionParts.push(`[fileId:${data.attachedFileId}]`);
+    } else if (data.attachedFileUrl) {
+      descriptionParts.push(`[fileUrl:${data.attachedFileUrl}]`);
+    }
+    const preservedText = this.stripDescriptionMarkers(data.existingDescription);
+    if (preservedText) {
+      descriptionParts.push(preservedText);
+    }
+
+    // `callServerTool` chỉ reject khi lỗi đường truyền; Hub từ chối thì vẫn resolve với
+    // `isError: true`. `parseToolResult` biến trường hợp đó thành lỗi ném ra.
+    parseToolResult(await this.app.callServerTool({
+      name: 'mcpapp.lists.updateItem',
+      arguments: {
+        itemId: profileId,
+        title: data.name,
+        customFields,
+        ...(descriptionParts.length > 0 ? { description: descriptionParts.join('\n\n') } : {}),
+      },
+    }));
+  }
+
+  /**
+   * Phần chữ tay trong description sau khi bỏ mọi marker do app ghi. Marker được dựng lại
+   * từ dữ liệu mới, nên giữ bản cũ sẽ nhân đôi hoặc để lại id đã lỗi thời.
+   */
+  private stripDescriptionMarkers(description: string | undefined): string {
+    if (!description) return '';
+    return description
+      .replace(/\[(?:sourceCandidateId|fileId|fileUrl):[^\]]*\]/g, '')
+      .replace(/\n\s*\n/g, '\n\n')
+      .trim();
   }
 
   // --- Private Helper Methods ---
@@ -401,6 +467,10 @@ export class PrivOSLifecycleService implements ILifecycleService {
       status: this.getStageName(item, list.stages),
     };
 
+    if (typeof item.description === 'string') {
+      profile.rawDescription = item.description;
+    }
+
     if (item.description) {
         const sourceMatch = item.description.match(/\[sourceCandidateId:(.+?)\]/);
         if (sourceMatch) {
@@ -518,10 +588,59 @@ export class PrivOSLifecycleService implements ILifecycleService {
   }
 
   /**
+   * Build custom fields for update: send the full array including nulls for cleared fields.
+   *
+   * Unlike `buildCustomFieldsForCreation` (which only sends fields with values), this method
+   * sends every field — with null for cleared/omitted fields. This is required for merge
+   * semantics: omitting a field leaves the old value on the item, so clearing a field (phone: '')
+   * must send null to overwrite the old value.
+   *
+   * The DOCUMENT field (`attachedFileObj`) is the one exception to "always send, null when
+   * absent": we never know here whether the caller simply did not pass it or the attachment was
+   * intentionally removed, and `customFields` may replace the whole set on the Hub side. Nulling
+   * it on every unrelated edit would silently strip the card's file. So it is resent verbatim
+   * (same `[fileObj]` shape `createProfile` writes) only when the caller supplies a value, and
+   * skipped — never nulled — otherwise.
+   */
+  // `any[]`: field definitions are room-defined and have no static schema, same as the helpers around it.
+  private buildCustomFieldsForUpdate(data: UpdateProfileFieldsInput, fieldDefinitions: any[] | undefined): any[] {
+    const customFields: any[] = [];
+    if (!fieldDefinitions) return customFields;
+
+    fieldDefinitions.forEach((fd: any) => {
+      const key = resolveProfileFieldKey(fd.name);
+      if (!key) return;
+
+      if (key === 'attachedFileObj') {
+        if (data.attachedFileObj !== undefined && data.attachedFileObj !== null) {
+          customFields.push({ fieldId: fd._id || fd.id, value: [data.attachedFileObj] });
+        }
+        return;
+      }
+
+      const value = this.getProfileValueByFieldName(data, fd.name);
+      // For update: send null for undefined/empty, otherwise send the processed value
+      if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
+        customFields.push({
+          fieldId: fd._id || fd.id,
+          value: null
+        });
+      } else {
+        customFields.push({
+          fieldId: fd._id || fd.id,
+          value: this.getRawValueForField(fd, value)
+        });
+      }
+    });
+
+    return customFields;
+  }
+
+  /**
    * `fieldName` comes from a room-defined field definition, so it is the untyped side here.
-   * `data` is `Omit<EmployeeProfile, '_id' | 'status'>` at the only call site
-   * (`buildCustomFieldsForCreation`); the `any` is kept only so the two private helpers in this
-   * class keep a matching shape, not because the payload is dynamic.
+   * `data` is `Omit<EmployeeProfile, '_id' | 'status'>` from `buildCustomFieldsForCreation` and
+   * `UpdateProfileFieldsInput` from `buildCustomFieldsForUpdate`; the `any` lets both callers share
+   * this lookup, not because the payload is dynamic.
    */
   private getProfileValueByFieldName(data: any, fieldName: string): any {
     const key = resolveProfileFieldKey(fieldName);
@@ -533,7 +652,8 @@ export class PrivOSLifecycleService implements ILifecycleService {
       case 'position': return data.position;
       case 'department': return data.department;
       case 'startDate': return data.startDate;
-      // Tệp hồ sơ đi qua mcpapp.files rồi gắn vào description, không ghi thành custom field.
+      // Tệp hồ sơ không lấy qua đây: luồng tạo gắn file vào trường DOCUMENT và marker description
+      // trong `createProfile`, luồng sửa gửi lại nó riêng trong `buildCustomFieldsForUpdate`.
       case 'attachedFileObj': return undefined;
     }
   }

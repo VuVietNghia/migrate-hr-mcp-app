@@ -9,6 +9,12 @@ export interface EmployeeProfile {
   startDate?: string;
   sourceCandidateId?: string;
   attachedFileObj?: any;
+  /** Bóc từ `[fileId:...]` trong description của item. */
+  attachedFileId?: string;
+  /** Bóc từ `[fileUrl:...]` trong description của item. */
+  attachedFileUrl?: string;
+  /** Description thô của item, giữ lại để lúc sửa không xoá mất phần chữ mà app không sở hữu. */
+  rawDescription?: string;
 }
 
 export interface KanbanColumnDef {
@@ -38,9 +44,27 @@ export interface PassedCandidate {
   phone?: string;
 }
 
+/** Các trường của một hồ sơ được đồng bộ ngược từ file Markdown vào item trong list. */
+export interface UpdateProfileFieldsInput {
+  name: string;
+  phone?: string;
+  email?: string;
+  position?: string;
+  department?: string;
+  startDate?: string;
+  sourceCandidateId?: string;
+  attachedFileId?: string;
+  attachedFileUrl?: string;
+  /** File object lưu trong custom field DOCUMENT. */
+  attachedFileObj?: unknown;
+  /** Description hiện tại của item; phần chữ không phải marker trong đó được giữ nguyên. */
+  existingDescription?: string;
+}
+
 export interface ILifecycleService {
   loadProfiles(roomId: string): Promise<EmployeeProfile[]>;
   loadPassedCandidates(roomId: string): Promise<PassedCandidate[]>;
   createProfile(roomId: string, data: Omit<EmployeeProfile, '_id' | 'status'> & { attachedFileObj?: any }): Promise<EmployeeProfile>;
   updateProfileStatus(roomId: string, profileId: string, newStatus: string): Promise<void>;
+  updateProfileFields(roomId: string, profileId: string, data: UpdateProfileFieldsInput): Promise<void>;
 }
