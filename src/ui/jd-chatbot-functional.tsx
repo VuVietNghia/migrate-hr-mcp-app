@@ -58,6 +58,13 @@ function renderJDMarkdown(content: string, changedLines: Set<number>) {
 }
 
 
+/**
+ * This tab rewrites the selected JD through `createOrUpdateFile`, which writes UTF-8 text, so it
+ * only lists what it can safely round-trip. The CV Pipeline picker also accepts PDF and .docx —
+ * those are read through the Hub parser and would be destroyed by a save from here.
+ */
+const EDITABLE_JD_FILE = /\.md$/i;
+
 export default function JDChatbotFunctional() {
   const app = usePrivosApp(); const { roomId } = usePrivosContext(); const service = useRef<PipelineService>();
   const chatMessagesRef = useRef<HTMLDivElement>(null);
@@ -65,7 +72,7 @@ export default function JDChatbotFunctional() {
   const [jds, setJds] = useState<CVFile[]>([]); const [selected, setSelected] = useState<CVFile | null>(null);
   const [draft, setDraft] = useState(''); const [saved, setSaved] = useState(''); const [changedJDLines, setChangedJDLines] = useState<Set<number>>(new Set()); const [messages, setMessages] = useState<Message[]>([hello]);
   const [input, setInput] = useState(''); const [open, setOpen] = useState(false); const [librarySearch, setLibrarySearch] = useState(''); const [busy, setBusy] = useState(false); const [editing, setEditing] = useState(false); const [exitConfirmOpen, setExitConfirmOpen] = useState(false); const [jdLoading, setJDLoading] = useState(false); const [jdLoadError, setJDLoadError] = useState<string | null>(null); const [isSaving, setIsSaving] = useState(false); const [includeCompany, setIncludeCompany] = useState(false); const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const refresh = async () => { if (!service.current) return []; const files = await service.current.fetchAvailableJDs(); setJds(files); return files; };
+  const refresh = async () => { if (!service.current) return []; const files = (await service.current.fetchAvailableJDs()).filter(jd => EDITABLE_JD_FILE.test(jd.name)); setJds(files); return files; };
   useEffect(() => { service.current = new PipelineService(app, roomId, new MarkdownPathContextBuilder()); refresh().catch(console.error); }, [app, roomId]);
   useEffect(() => { if (chatMessagesRef.current) chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight; }, [messages, busy]);
   useEffect(() => { if (draft === saved) setChangedJDLines(new Set()); }, [draft, saved]);

@@ -691,8 +691,11 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
     }
   }, [addLog, files, jdName, processing, selectedIds, showToast]);
 
+  // Gated on the tab being open only, like every other tab in this app. It used to also require a
+  // ticked CV or an already-chosen JD, which meant the common case — open CV Pipeline, create a JD
+  // elsewhere, come back — never polled at all, and the new JD showed up only after a page reload.
   usePolling(reconcileSelectedFiles, {
-    enabled: active && !processing && (selectedIds.size > 0 || Boolean(jdName)),
+    enabled: active && !processing && Boolean(app && roomId),
     interval: 3000,
     immediate: false,
   });
@@ -1013,6 +1016,7 @@ REQUIRED:
       addLog(currentStatus.status === 'completed' ? `Xong: ${cv.name}` : `Dừng xử lý: ${cv.name}`);
     }
 
+    let kanbanError: string | null = null;
     if (serviceRef.current.createKanbanBatchViaAI && resultsForKanban.length > 0) {
       addLog(`Bắt đầu tạo List Kanban và lưu kết quả ${resultsForKanban.length} CV...`);
       try {
@@ -1026,21 +1030,32 @@ REQUIRED:
           addLog(`[Thành công] Đã trích xuất thành công Email/SĐT cho ${resultsForKanban.length} CV!`);
         }
       } catch (err: any) {
-        addLog(`Lỗi tạo Kanban: ${err.message}`);
+        kanbanError = err?.message || String(err);
+        addLog(`Lỗi tạo Kanban: ${kanbanError}`);
       }
     }
 
     setProcessing(false);
     addLog('\u2014 Pipeline k\u1ebft th\u00fac \u2014');
     await loadFiles();
-    showToast('\u0110\u00e3 ch\u1ea5m \u0111i\u1ec3m xong v\u00e0 l\u01b0u k\u1ebft qu\u1ea3 v\u00e0o list.');
+    // K\u1ebft qu\u1ea3 v\u1eabn \u0111\u01b0\u1ee3c l\u01b0u file .md, nh\u01b0ng n\u1ebfu ghi list l\u1ed7i th\u00ec tab "CV \u0111\u00e3 ch\u1ea5m" kh\u00f4ng c\u00f3 g\u00ec \u2014
+    // ph\u1ea3i b\u00e1o \u0111\u00fang thay v\u00ec toast th\u00e0nh c\u00f4ng (log ch\u1ec9 n\u1eb1m trong console).
+    if (kanbanError) {
+      showToast(`\u0110\u00e3 ch\u1ea5m xong nh\u01b0ng kh\u00f4ng l\u01b0u \u0111\u01b0\u1ee3c v\u00e0o list: ${kanbanError}`, 'error');
+    } else {
+      showToast('\u0110\u00e3 ch\u1ea5m \u0111i\u1ec3m xong v\u00e0 l\u01b0u k\u1ebft qu\u1ea3 v\u00e0o list.');
+    }
   };
 
 
   const resultList = Object.values(statuses);
   const batchProgress = getBatchProgress(activeBatchFileIds, statuses);
-  const defaultJDs = availableJDs.filter(jd => jd.name.startsWith('JD_') && !jd.name.startsWith('JD_AI_'));
-  const aiGeneratedJDs = availableJDs.filter(jd => !jd.name.startsWith('JD_') || jd.name.startsWith('JD_AI_'));
+  // Both JD generators (this tab's form and the chat tab) must save as `JD_AI_…`, so that prefix is
+  // the only thing that marks a JD as AI-made. Anything else — the seeded JDs and whatever a user
+  // uploads from their machine — belongs under "JD tuyển dụng"; the old rule filed every name not
+  // starting with `JD_` (e.g. `JD-Frontend.pdf`) under "AI tạo".
+  const aiGeneratedJDs = availableJDs.filter(jd => jd.name.startsWith('JD_AI_'));
+  const defaultJDs = availableJDs.filter(jd => !jd.name.startsWith('JD_AI_'));
   const selectedJD = availableJDs.find(jd => jd.name === jdName);
   const jdDropdownLabel = jdLoading ? "Vui l\u00f2ng ch\u1edd JD \u0111ang t\u1ea3i l\u00ean" : selectedJD?.name || "Ch\u1ecdn JD";
   const isJDFormReady = hasJDFormValue(jdForm);
