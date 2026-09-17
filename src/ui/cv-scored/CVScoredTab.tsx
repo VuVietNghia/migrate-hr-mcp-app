@@ -9,6 +9,8 @@ import { canShowInviteMailButton, getCVColumnLabel, getCVColumnsForStages, getIn
 import { restCall } from '../privos-rest';
 import { usePolling } from '../hooks/usePolling';
 import { CVBoardPollingGuard } from './polling-sync';
+import { moveCVToStage } from './cv-stage-move';
+import { applyInviteSentToBoards, buildInviteSentMessage, moveInvitedCVToPendingStage } from './invite-sent-outcome';
 import { fetchScreeningListItems, readBoardStatuses } from './cv-list-reader';
 import { buildTrackedInviteEmailRequest } from './invite-email-request';
 import { UserSessionTrackedMail } from '../email-history/user-session-tracked-mail';
@@ -448,28 +450,17 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
           customFields: updatedCustomFields,
         },
       });
-      const interviewPendingStageId = getInterviewPendingStageId(selectedBoard.stagesMap);
-      if (interviewPendingStageId) {
-        await app.callServerTool({
-          name: 'mcpapp.lists.moveItemToStage',
-          arguments: { itemId: selectedCVForInvite._id, stageId: interviewPendingStageId },
-        });
+      const stageMove = await moveInvitedCVToPendingStage(
+        app,
+        selectedCVForInvite._id,
+        getInterviewPendingStageId(selectedBoard.stagesMap),
+      );
+      if (stageMove.status === 'failed') {
+        console.error('[CVScoredTab] Đã gửi mail mời nhưng không chuyển được CV sang cột Chưa phỏng vấn:', stageMove.detail);
       }
       setSentInviteCVIds((previous) => new Set(previous).add(selectedCVForInvite._id));
-      setBoards((previous) => previous.map((board) => ({
-        ...board,
-        cvs: board.cvs.map((cv) => cv._id === selectedCVForInvite._id
-          ? {
-              ...cv,
-              customFields: updatedCustomFields,
-              inviteMailSent: true,
-              ...(interviewPendingStageId ? { status: '07_Chua_Phong_Van' } : {}),
-            }
-          : cv),
-      })));
-      alert(logged
-        ? `Đã gửi email mời phỏng vấn thành công tới ${targetEmail}!`
-        : `Đã gửi email mời phỏng vấn tới ${targetEmail}. Lưu ý: chưa lưu được vào lịch sử email, không cần gửi lại.`);
+      setBoards((previous) => applyInviteSentToBoards(previous, selectedCVForInvite._id, updatedCustomFields, stageMove));
+      alert(buildInviteSentMessage({ targetEmail, logged, stageMove }));
       setInviteModalOpen(false);
     } catch (err: any) {
       console.error('Lỗi gửi email:', err);
@@ -829,10 +820,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
     }));
 
     try {
-      await app.callServerTool({
-        name: 'mcpapp.lists.moveItemToStage',
-        arguments: { itemId: id, stageId }
-      });
+      await moveCVToStage(app, id, stageId);
     } catch (err) {
       console.error(err);
       if (previousStatus) {
