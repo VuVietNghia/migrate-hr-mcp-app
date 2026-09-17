@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { UserOutlined } from '@ant-design/icons';
 import '../hr-premium-styles.css';
 import { getKanbanColumnScrollDistance } from './kanban-scroll';
 import { getInviteEmailValidationError } from './invite-email-validation';
@@ -51,7 +52,6 @@ function CVCard({
   isInviteSent: boolean
 }) {
   const [isDragging, setIsDragging] = useState(false);
-  const initials = cv.name.substring(0, 2).toUpperCase();
   const displayName = cv.name.length > 27 ? cv.name.substring(0, 27) + '...' : cv.name;
   const inviteMailButton = getInviteMailButtonState(isInviteSent);
 
@@ -73,7 +73,7 @@ function CVCard({
     >
       <div className="profile-card-header">
         <div className="profile-name-row" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div className="profile-avatar" style={{ backgroundColor: 'var(--accent)', flexShrink: 0 }}>{initials}</div>
+          <div className="profile-avatar" style={{ backgroundColor: 'var(--accent)', flexShrink: 0 }} aria-hidden="true"><UserOutlined style={{ fontSize: '18px' }} /></div>
           <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
             <div className="profile-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden' }} title={cv.name}>{displayName}</div>
             <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -973,8 +973,9 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
                     fontSize: '18px',
                     boxShadow: '0 4px 12px rgba(21,111,245,0.25)'
                   }}
+                  aria-hidden="true"
                 >
-                  {selectedCVForDetail.cv.name.substring(0, 2).toUpperCase()}
+                  <UserOutlined style={{ fontSize: '26px' }} />
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text)' }}>
