@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { AppstoreOutlined, SearchOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { EmployeeProfile, PassedCandidate } from './types';
 import { PrivOSLifecycleService } from './services/PrivOSLifecycleService';
 import { LifecycleServiceProvider, useLifecycleService } from './di/LifecycleContext';
@@ -274,7 +275,7 @@ function LifecycleContent({ active }: { active: boolean }) {
       <div className="hr-toolbar">
         <div className="hr-toolbar-left" style={{ flexWrap: 'wrap', gap: '8px' }}>
           <div className="hr-search-box">
-            <span className="hr-search-icon">🔍</span>
+            <span className="hr-search-icon"><SearchOutlined /></span>
             <input 
               type="text"
               className="hr-search-input"
@@ -324,7 +325,7 @@ function LifecycleContent({ active }: { active: boolean }) {
               onClick={() => setViewMode('kanban')}
               title="Xem dạng Bảng Kanban"
             >
-              📊 Kanban
+              <AppstoreOutlined /> Kanban
             </button>
             <button
               type="button"
@@ -332,7 +333,7 @@ function LifecycleContent({ active }: { active: boolean }) {
               onClick={() => setViewMode('list')}
               title="Xem dạng Danh sách"
             >
-              📋 Danh sách
+              <UnorderedListOutlined /> Danh sách
             </button>
           </div>
 

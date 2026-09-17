@@ -1,6 +1,19 @@
 import { useState } from 'react';
 import { usePrivosContext } from '@privos_ai/app-react';
-import { CheckOutlined, CopyOutlined, MailOutlined, PhoneOutlined, SendOutlined } from '@ant-design/icons';
+import {
+  CheckOutlined,
+  CopyOutlined,
+  EditOutlined,
+  FileTextOutlined,
+  HourglassOutlined,
+  MailOutlined,
+  PhoneOutlined,
+  RightOutlined,
+  SendOutlined,
+  StopOutlined,
+  TrophyOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
 import { EmployeeProfile, KANBAN_COLUMNS } from '../types';
 import { getInitials, calculateTimelineInfo } from '../utils';
 import { EmailComposerModal } from './EmailComposerModal';
@@ -122,10 +135,7 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
                             style={{ fontSize: '0.75rem', color: 'var(--accent)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
                             title={getFileName(profile) || 'Xem tài liệu'}
                           >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                              <polyline points="14 2 14 8 20 8"></polyline>
-                            </svg>
+                            <FileTextOutlined />
                             {getFileName(profile)}
                           </a>
                         </div>
@@ -166,7 +176,7 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
                             : 'badge-tenure'
                         }
                       >
-                        {timeline.type === 'probation' ? (timeline.isUrgent ? '⚠️ ' : '⏳ ') : timeline.type === 'resigned' ? '🛑 ' : '🎖️ '}
+                        {timeline.type === 'probation' ? (timeline.isUrgent ? <WarningOutlined /> : <HourglassOutlined />) : timeline.type === 'resigned' ? <StopOutlined /> : <TrophyOutlined />}{' '}
                         {timeline.text}
                       </span>
                     )}
@@ -238,7 +248,7 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
                         onClick={() => setEditProfile(profile)}
                         title="Sửa thông tin trong file hồ sơ"
                       >
-                        Sửa
+                        <EditOutlined /> Sửa
                       </button>
                     )}
                     {nextColumn && onMoveProfile && (
@@ -248,7 +258,7 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
                         onClick={() => onMoveProfile(profile._id, nextColumn.status)}
                         title={`Chuyển sang [${nextColumn.status}]`}
                       >
-                        → {nextColumn.status}
+                        <RightOutlined /> {nextColumn.status}
                       </button>
                     )}
                   </div>

@@ -1,6 +1,20 @@
 import React, { useState } from 'react';
 import { usePrivosContext } from '@privos_ai/app-react';
-import { CheckOutlined, CopyOutlined, SendOutlined } from '@ant-design/icons';
+import {
+  CheckOutlined,
+  CopyOutlined,
+  EditOutlined,
+  FileTextOutlined,
+  HolderOutlined,
+  HourglassOutlined,
+  LeftOutlined,
+  MailOutlined,
+  PhoneOutlined,
+  RightOutlined,
+  SendOutlined,
+  StopOutlined,
+  TrophyOutlined,
+} from '@ant-design/icons';
 import { EmployeeProfile, KANBAN_COLUMNS } from '../types';
 import { getInitials, calculateTimelineInfo } from '../utils';
 import { EmailComposerModal } from './EmailComposerModal';
@@ -102,15 +116,15 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
               <div style={{ marginTop: '2px' }}>
                 {timeline.type === 'probation' ? (
                   <span className={`badge-probation ${timeline.isUrgent ? 'badge-probation-warning' : ''}`} title="Thời hạn thử việc">
-                    ⏳ {timeline.text}
+                    <HourglassOutlined /> {timeline.text}
                   </span>
                 ) : timeline.type === 'resigned' ? (
                   <span className="badge-resigned" title="Trạng thái nghỉ việc">
-                    🛑 {timeline.text}
+                    <StopOutlined /> {timeline.text}
                   </span>
                 ) : (
                   <span className="badge-tenure" title="Thâm niên làm việc">
-                    🎖️ {timeline.text}
+                    <TrophyOutlined /> {timeline.text}
                   </span>
                 )}
               </div>
@@ -118,14 +132,7 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
           </div>
         </div>
         <div className="drag-handle" title="Kéo thả thẻ">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="9" cy="5" r="1"/>
-            <circle cx="9" cy="12" r="1"/>
-            <circle cx="9" cy="19" r="1"/>
-            <circle cx="15" cy="5" r="1"/>
-            <circle cx="15" cy="12" r="1"/>
-            <circle cx="15" cy="19" r="1"/>
-          </svg>
+          <HolderOutlined />
         </div>
       </div>
 
@@ -140,9 +147,7 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
             <div className="detail-row" style={{ justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span className="detail-icon">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-                  </svg>
+                  <PhoneOutlined />
                 </span>
                 <span>{profile.phone}</span>
               </div>
@@ -163,10 +168,7 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
             <div className="detail-row" style={{ justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1, marginRight: '6px' }}>
                 <span className="detail-icon">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                    <polyline points="22,6 12,13 2,6"/>
-                  </svg>
+                  <MailOutlined />
                 </span>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={profile.email}>
                   {profile.email}
@@ -201,10 +203,7 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
             <div className="detail-row" style={{ marginTop: '4px', borderTop: '1px dashed var(--border)', paddingTop: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
                 <span className="detail-icon" style={{ color: 'var(--accent)' }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                  </svg>
+                  <FileTextOutlined />
                 </span>
                 <a 
                   href={getFileUrl(profile)} 
@@ -233,7 +232,7 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
               setIsEditModalOpen(true);
             }}
           >
-            Sửa
+            <EditOutlined /> Sửa
           </button>
         </div>
       )}
@@ -250,7 +249,7 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
                 onMoveProfile(profile._id, prevColumn.status);
               }}
             >
-              ← {prevColumn.status}
+              <LeftOutlined /> {prevColumn.status}
             </button>
           )}
           {nextColumn && (
@@ -263,7 +262,7 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
                 onMoveProfile(profile._id, nextColumn.status);
               }}
             >
-              {nextColumn.status} →
+              {nextColumn.status} <RightOutlined />
             </button>
           )}
         </div>

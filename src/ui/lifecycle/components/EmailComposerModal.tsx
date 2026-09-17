@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { EmployeeProfile } from '../types';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { CloseOutlined, MailOutlined } from '@ant-design/icons';
 import { UserSessionTrackedMail } from '../../email-history/user-session-tracked-mail';
 import { useEmployeeEmailTemplateRepository } from '../di/EmployeeEmailTemplateContext';
 import { isValidEmailAddress } from '../../utils/email-validation';
@@ -156,8 +157,8 @@ export function EmailComposerModal({ isOpen, onClose, profile }: EmailComposerMo
     <div className="bot-template-modal-overlay">
       <div className="bot-template-modal-content" style={{ width: 800, height: 'auto', minHeight: 450, display: 'flex', flexDirection: 'column' }}>
         <div className="bot-template-modal-header">
-          <h3>✉️ Gửi Email cho {profile.name}</h3>
-          <button className="bot-template-close-btn" onClick={onClose}>×</button>
+          <h3><MailOutlined /> Gửi Email cho {profile.name}</h3>
+          <button className="bot-template-close-btn" onClick={onClose} title="Đóng" aria-label="Đóng"><CloseOutlined /></button>
         </div>
         {!templateState.loading && (templateState.error || !templateState.activeTemplate) && (
           <div role="alert" style={{ margin: '16px 20px 0', color: '#dc2626', fontSize: '13px' }}>

@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import {
+  CheckCircleOutlined,
+  CloseOutlined,
+  PushpinOutlined,
+  StarOutlined,
+  TagOutlined,
+  ThunderboltOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
 import { EmployeeProfile, PassedCandidate } from '../types';
 import { ensureFolderPath, createOrUpdateFile } from '../../privos-rest';
 import employeeTemplateRaw from '../../data/employee_template.md?raw';
@@ -284,21 +293,22 @@ export function CreateDetailedProfileForm({
             className="hr-btn hr-btn-subtle"
             onClick={onCancel}
             title="Đóng form"
+            aria-label="Đóng form"
           >
-            ✕
+            <CloseOutlined />
           </button>
         </div>
 
         {isSuccess && (
           <div className="hr-status-banner hr-status-success">
-            <span>✅</span>
+            <CheckCircleOutlined />
             <span>Hồ sơ đã được lưu thành công!</span>
           </div>
         )}
 
         {errorMsg && (
           <div className="hr-status-banner hr-status-error">
-            <span>⚠️</span>
+            <WarningOutlined />
             <span>{errorMsg}</span>
           </div>
         )}
@@ -312,7 +322,7 @@ export function CreateDetailedProfileForm({
           borderRadius: 8
         }}>
           <label className="hr-label" style={{ color: '#2563EB', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>✨</span> Chọn nhanh từ ứng viên phỏng vấn / nhận việc (Stage 05+) ({passedCandidates.length} ứng viên)
+            <ThunderboltOutlined /> Chọn nhanh từ ứng viên phỏng vấn / nhận việc (Stage 05+) ({passedCandidates.length} ứng viên)
           </label>
           <select
             className="hr-input"
@@ -324,7 +334,7 @@ export function CreateDetailedProfileForm({
             <option value="">-- Chọn ứng viên từ vòng phỏng vấn (05_Moi_Phong_Van trở đi) --</option>
             {passedCandidates.map((c) => (
               <option key={c._id} value={c._id}>
-                👤 {c.name} {c.score !== undefined ? `(${c.score}đ)` : ''} — Đợt: {c.listName} {c.position ? `[${c.position}]` : ''}
+                {c.name} {c.score !== undefined ? `(${c.score}đ)` : ''} — Đợt: {c.listName} {c.position ? `[${c.position}]` : ''}
               </option>
             ))}
           </select>
@@ -339,12 +349,12 @@ export function CreateDetailedProfileForm({
               flexWrap: 'wrap',
               alignItems: 'center'
             }}>
-              <span>📌 Đợt: <strong>{selectedCandidate.listName}</strong></span>
+              <span><PushpinOutlined /> Đợt: <strong>{selectedCandidate.listName}</strong></span>
               {selectedCandidate.score !== undefined && (
-                <span>⭐ Điểm: <strong>{selectedCandidate.score}/100</strong></span>
+                <span><StarOutlined /> Điểm: <strong>{selectedCandidate.score}/100</strong></span>
               )}
               {selectedCandidate.stageName && (
-                <span>🏷️ Cột: <strong>{selectedCandidate.stageName}</strong></span>
+                <span><TagOutlined /> Cột: <strong>{selectedCandidate.stageName}</strong></span>
               )}
             </div>
           )}
