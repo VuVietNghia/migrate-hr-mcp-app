@@ -116,6 +116,14 @@ describe('PrivOSLifecycleService.loadProfiles', () => {
     ]);
   });
 
+  it('keeps the raw item description so an edit can preserve hand-written notes', async () => {
+    const { app } = createAppStub(healthyRoom([{ ...EMPLOYEE_ITEM, description: 'ghi chu' }]));
+    const service = new PrivOSLifecycleService(app as never);
+
+    const profiles = await service.loadProfiles('room-1');
+    expect(profiles[0].rawDescription).toBe('ghi chu');
+  });
+
   it('rejects a tool-level (isError) failure from mcpapp.lists.getAll instead of silently provisioning a duplicate list', async () => {
     // Error text is deliberately valid JSON ('{}'). A hand-rolled `JSON.parse(text)` treats
     // this as an empty success payload and masks the failure — the exact bug being asserted
