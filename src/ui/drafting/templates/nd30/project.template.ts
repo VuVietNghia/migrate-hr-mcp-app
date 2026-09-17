@@ -6,7 +6,7 @@ export const projectTemplate: DraftingTemplate = {
   category: 'kehoach',
   categoryLabel: 'Kế hoạch & Báo cáo',
   track: 'nd30_administrative',
-  icon: '📄',
+  icon: 'fileText',
   description: 'Mẫu Dự án (Project) chuẩn thể thức Nghị định 30/2020/NĐ-CP.',
   defaultData: {
     companyName: '[Tên công ty]',

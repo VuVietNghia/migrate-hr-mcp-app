@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { usePrivosContext } from '@privos_ai/app-react';
+import { CheckOutlined, CopyOutlined, MailOutlined, PhoneOutlined, SendOutlined } from '@ant-design/icons';
 import { EmployeeProfile, KANBAN_COLUMNS } from '../types';
 import { getInitials, calculateTimelineInfo } from '../utils';
 import { EmailComposerModal } from './EmailComposerModal';
@@ -177,22 +178,19 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     {profile.phone ? (
                       <div className="detail-row">
-                        <span className="detail-icon">📞</span>
-                        <a 
-                          href={`tel:${profile.phone}`} 
-                          style={{ color: 'inherit', textDecoration: 'none', fontWeight: 500 }}
-                          title="Bấm để gọi"
-                        >
+                        <span className="detail-icon"><PhoneOutlined /></span>
+                        <span style={{ color: 'inherit', fontWeight: 500 }}>
                           {profile.phone}
-                        </a>
+                        </span>
                         <button
                           type="button"
                           className="hr-icon-btn"
                           onClick={() => copyToClipboard(profile._id, profile.phone!, 'phone')}
-                          title="Sao chép SĐT"
+                          title={copiedField?.id === profile._id && copiedField?.field === 'phone' ? 'Đã chép SĐT' : 'Sao chép SĐT'}
+                          aria-label={copiedField?.id === profile._id && copiedField?.field === 'phone' ? 'Đã chép SĐT' : 'Sao chép SĐT'}
                           style={{ padding: '1px 5px', fontSize: '0.7rem' }}
                         >
-                          {copiedField?.id === profile._id && copiedField?.field === 'phone' ? '✓ Đã chép' : '📋'}
+                          {copiedField?.id === profile._id && copiedField?.field === 'phone' ? <CheckOutlined /> : <CopyOutlined />}
                         </button>
                       </div>
                     ) : (
@@ -201,7 +199,7 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
 
                     {profile.email && (
                       <div className="detail-row">
-                        <span className="detail-icon">✉️</span>
+                        <span className="detail-icon"><MailOutlined /></span>
                         <span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={profile.email}>
                           {profile.email}
                         </span>
@@ -209,19 +207,21 @@ export function ProfileListView({ profiles, isLoading, onMoveProfile }: ProfileL
                           type="button"
                           className="hr-icon-btn"
                           onClick={() => copyToClipboard(profile._id, profile.email!, 'email')}
-                          title="Sao chép Email"
+                          title={copiedField?.id === profile._id && copiedField?.field === 'email' ? 'Đã chép Email' : 'Sao chép Email'}
+                          aria-label={copiedField?.id === profile._id && copiedField?.field === 'email' ? 'Đã chép Email' : 'Sao chép Email'}
                           style={{ padding: '1px 5px', fontSize: '0.7rem' }}
                         >
-                          {copiedField?.id === profile._id && copiedField?.field === 'email' ? '✓ Đã chép' : '📋'}
+                          {copiedField?.id === profile._id && copiedField?.field === 'email' ? <CheckOutlined /> : <CopyOutlined />}
                         </button>
                         <button
                           type="button"
                           className="hr-icon-btn"
                           onClick={() => setEmailProfile(profile)}
                           title="Gửi Email"
+                          aria-label="Gửi Email"
                           style={{ padding: '1px 5px', fontSize: '0.7rem', marginLeft: '4px' }}
                         >
-                          ✉️
+                          <SendOutlined />
                         </button>
                       </div>
                     )}

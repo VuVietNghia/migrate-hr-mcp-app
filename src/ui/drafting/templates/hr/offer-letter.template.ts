@@ -6,7 +6,7 @@ export const offerLetterTemplate: DraftingTemplate = {
   category: 'thoathuan',
   categoryLabel: 'Ghi nhận & Thỏa thuận',
   track: 'modern_enterprise',
-  icon: '✉️',
+  icon: 'mail',
   description: 'Thư mời nhận việc trang trọng gửi ứng viên trúng tuyển, chuẩn chính sách đãi ngộ của doanh nghiệp.',
   defaultData: {
     companyName: '[Tên công ty]',

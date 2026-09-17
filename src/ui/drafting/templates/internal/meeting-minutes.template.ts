@@ -6,7 +6,7 @@ export const meetingMinutesTemplate: DraftingTemplate = {
   category: 'thoathuan',
   categoryLabel: 'Ghi nhận & Thỏa thuận',
   track: 'nd30_administrative',
-  icon: '✍️',
+  icon: 'edit',
   description: 'Biên bản ghi nhận diễn biến, kết luận cuộc họp Ban Giám đốc hoặc Hội đồng chuyên môn.',
   defaultData: {
     companyName: '[Tên công ty]',

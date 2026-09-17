@@ -6,7 +6,7 @@ export const internalAnnouncementTemplate: DraftingTemplate = {
   category: 'thongtin',
   categoryLabel: 'Thông tin & Giao tiếp',
   track: 'nd30_administrative',
-  icon: '📢',
+  icon: 'notification',
   description: 'Thông báo toàn thể CBNV chuẩn thể thức văn bản hành chính công vụ.',
   defaultData: {
     companyName: '[Tên công ty]',

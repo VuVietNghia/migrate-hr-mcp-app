@@ -6,7 +6,7 @@ export const agreementTemplate: DraftingTemplate = {
   category: 'thoathuan',
   categoryLabel: 'Ghi nhận & Thỏa thuận',
   track: 'nd30_administrative',
-  icon: '📄',
+  icon: 'fileText',
   description: 'Mẫu Bản thỏa thuận (Agreement) chuẩn thể thức Nghị định 30/2020/NĐ-CP.',
   defaultData: {
     companyName: '[Tên công ty]',

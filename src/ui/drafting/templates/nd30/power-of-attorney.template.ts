@@ -6,7 +6,7 @@ export const powerOfAttorneyTemplate: DraftingTemplate = {
   category: 'thongtin',
   categoryLabel: 'Thông tin & Giao tiếp',
   track: 'nd30_administrative',
-  icon: '⚖️',
+  icon: 'audit',
   description: 'Văn bản ủy quyền đại diện ký kết hợp đồng, giải quyết thủ tục pháp lý hoặc điều hành công việc.',
   defaultData: {
     companyName: '[Tên công ty]',

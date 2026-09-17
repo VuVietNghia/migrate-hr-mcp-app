@@ -6,7 +6,7 @@ export const ruleTemplate: DraftingTemplate = {
   category: 'chidao',
   categoryLabel: 'Chỉ đạo & Điều hành',
   track: 'nd30_administrative',
-  icon: '📄',
+  icon: 'fileText',
   description: 'Mẫu Quy định (Rule) chuẩn thể thức Nghị định 30/2020/NĐ-CP.',
   defaultData: {
     companyName: '[Tên công ty]',

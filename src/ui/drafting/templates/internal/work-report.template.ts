@@ -6,7 +6,7 @@ export const workReportTemplate: DraftingTemplate = {
   category: 'kehoach',
   categoryLabel: 'Kế hoạch & Báo cáo',
   track: 'nd30_administrative',
-  icon: '📊',
+  icon: 'barChart',
   description: 'Báo cáo tổng kết tình hình thực hiện nhiệm vụ, kết quả và kiến nghị công tác chuẩn thể thức NĐ 30.',
   defaultData: {
     companyName: '[Tên công ty]',

@@ -6,7 +6,7 @@ export const officialDispatchTemplate: DraftingTemplate = {
   category: 'thongtin',
   categoryLabel: 'Thông tin & Giao tiếp',
   track: 'nd30_administrative',
-  icon: '📨',
+  icon: 'send',
   description: 'Công văn trao đổi công việc, đề nghị phối hợp hoặc phúc đáp đối tác chuẩn thể thức Nghị định 30.',
   defaultData: {
     companyName: '[Tên công ty]',

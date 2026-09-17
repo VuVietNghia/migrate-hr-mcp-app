@@ -6,7 +6,7 @@ export const salaryIncreaseDecisionTemplate: DraftingTemplate = {
   category: 'chidao',
   categoryLabel: 'Chỉ đạo & Điều hành',
   track: 'nd30_administrative',
-  icon: '🎖️',
+  icon: 'trophy',
   description: 'Quyết định hành chính chuẩn thể thức NĐ 30/2020/NĐ-CP về bổ nhiệm và điều chỉnh lương.',
   defaultData: {
     companyName: '[Tên công ty]',

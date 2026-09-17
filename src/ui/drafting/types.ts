@@ -1,6 +1,20 @@
 export type TemplateCategory = 'thoathuan' | 'chidao' | 'kehoach' | 'thongtin' | 'phutro';
 export type TemplateTrack = 'nd30_administrative' | 'modern_enterprise';
 
+export type DraftingTemplateIcon =
+  | 'mail'
+  | 'form'
+  | 'trophy'
+  | 'bulb'
+  | 'schedule'
+  | 'notification'
+  | 'edit'
+  | 'barChart'
+  | 'send'
+  | 'audit'
+  | 'fileDone'
+  | 'fileText';
+
 export type DraftingActionType =
   | 'full_generation'
   | 'make_formal'
@@ -15,7 +29,7 @@ export interface DraftingTemplate {
   category: TemplateCategory;
   categoryLabel: string;
   track: TemplateTrack;
-  icon: string;
+  icon: DraftingTemplateIcon;
   description: string;
   defaultData: Record<string, string>;
   templateText: string;

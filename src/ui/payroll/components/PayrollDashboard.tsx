@@ -1,5 +1,20 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { usePrivosApp } from '@privos_ai/app-react';
+import {
+  CheckCircleOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  CopyOutlined,
+  DownloadOutlined,
+  DownOutlined,
+  FileTextOutlined,
+  SafetyCertificateOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  TeamOutlined,
+  WalletOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
 import { usePolling } from '../../hooks/usePolling';
 import { IPayrollService, PayrollRecord } from '../types';
 import { EmployeeProfile, ILifecycleService } from '../../lifecycle/types';
@@ -446,19 +461,13 @@ export function PayrollDashboard({
               >
                 <summary className="payroll-export-menu-trigger">
                   <span className="payroll-export-menu-icon" aria-hidden="true">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 3v12" />
-                      <path d="m7 10 5 5 5-5" />
-                      <path d="M5 21h14" />
-                    </svg>
+                    <DownloadOutlined style={{ fontSize: 15 }} />
                   </span>
                   <span>
                     <span className="payroll-export-menu-title">{group.label}</span>
                     <span className="payroll-export-menu-count">{sourceCount} nhân sự</span>
                   </span>
-                  <svg className="payroll-export-menu-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
+                  <DownOutlined className="payroll-export-menu-chevron" style={{ fontSize: 14 }} aria-hidden="true" />
                 </summary>
                 <div className="payroll-export-menu-panel">
                   <p className="payroll-export-menu-description">
@@ -499,10 +508,7 @@ export function PayrollDashboard({
             title="Xem dữ liệu gốc JSON từ Database"
             aria-label="Xem dữ liệu gốc JSON từ Database"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
+            <SettingOutlined style={{ fontSize: 14 }} />
           </button>
         </div>
       </header>
@@ -510,14 +516,14 @@ export function PayrollDashboard({
       {/* Status Notifications */}
       {statusMsg && (
         <div className={`hr-status-banner hr-status-${statusMsg.type}`}>
-          {statusMsg.type === 'success' ? '✓' : '⚠️'} {statusMsg.text}
+          {statusMsg.type === 'success' ? <CheckCircleOutlined /> : <WarningOutlined />} {statusMsg.text}
         </div>
       )}
 
       {/* 4 KPI Stat Cards */}
       <div className="hr-stats-grid">
         <div className="hr-stat-card">
-          <div className="hr-stat-icon">👥</div>
+          <div className="hr-stat-icon"><TeamOutlined /></div>
           <div className="hr-stat-content">
             <span className="hr-stat-label">
               {selectedDept === 'all' ? 'Nhân sự đang làm việc' : `Đang làm việc (${selectedDept})`}
@@ -527,7 +533,7 @@ export function PayrollDashboard({
         </div>
 
         <div className="hr-stat-card">
-          <div className="hr-stat-icon" style={{ background: 'rgba(20, 134, 96, 0.1)', color: '#148660' }}>💰</div>
+          <div className="hr-stat-icon" style={{ background: 'rgba(20, 134, 96, 0.1)', color: '#148660' }}><WalletOutlined /></div>
           <div className="hr-stat-content">
             <span className="hr-stat-label">Tổng quỹ lương thực chi</span>
             <span className="hr-stat-value" style={{ color: '#148660' }}>
@@ -542,7 +548,7 @@ export function PayrollDashboard({
         </div>
 
         <div className="hr-stat-card">
-          <div className="hr-stat-icon" style={{ background: 'rgba(217, 119, 6, 0.1)', color: '#D97706' }}>📋</div>
+          <div className="hr-stat-icon" style={{ background: 'rgba(217, 119, 6, 0.1)', color: '#D97706' }}><FileTextOutlined /></div>
           <div className="hr-stat-content">
             <span className="hr-stat-label">Đã định mức lương</span>
             <span className="hr-stat-value">
@@ -552,7 +558,7 @@ export function PayrollDashboard({
         </div>
 
         <div className="hr-stat-card">
-          <div className="hr-stat-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10B981' }}>🛡️</div>
+          <div className="hr-stat-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10B981' }}><SafetyCertificateOutlined /></div>
           <div className="hr-stat-content">
             <span className="hr-stat-label">Hồ sơ thanh toán đủ</span>
             <span className="hr-stat-value" style={{ color: '#10B981' }}>
@@ -566,7 +572,7 @@ export function PayrollDashboard({
       <div className="hr-toolbar">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
           <div className="hr-search-box" style={{ flex: '1 1 280px' }}>
-            <span className="hr-search-icon">🔍</span>
+            <span className="hr-search-icon"><SearchOutlined /></span>
             <input 
               type="text"
               className="hr-search-input"
@@ -815,7 +821,7 @@ export function PayrollDashboard({
                           <span style={{ fontWeight: 500 }}>{pay.taxId}</span>
                         ) : (
                           <span className="badge-missing badge-missing-warn" title="Nhân viên chưa cập nhật Mã số thuế">
-                            ⚠️ Thiếu MST
+                            <WarningOutlined /> Thiếu MST
                           </span>
                         )}
                       </td>
@@ -828,14 +834,15 @@ export function PayrollDashboard({
                               type="button"
                               className={`hr-icon-btn ${copiedBankId === emp._id ? 'copied' : ''}`}
                               onClick={() => copyBankAccount(pay.bankAccount, emp._id)}
-                              title="Sao chép số tài khoản"
+                              title={copiedBankId === emp._id ? 'Đã chép số tài khoản' : 'Sao chép số tài khoản'}
+                              aria-label={copiedBankId === emp._id ? 'Đã chép số tài khoản' : 'Sao chép số tài khoản'}
                             >
-                              {copiedBankId === emp._id ? 'Đã chép' : 'Chép'}
+                              {copiedBankId === emp._id ? <CheckOutlined /> : <CopyOutlined />}
                             </button>
                           </div>
                         ) : (
                           <span className="badge-missing" title="Chưa cập nhật tài khoản nhận lương">
-                            ⚠️ Thiếu STK
+                            <WarningOutlined /> Thiếu STK
                           </span>
                         )}
                       </td>
@@ -871,15 +878,17 @@ export function PayrollDashboard({
           <div className="hr-debug-modal-content" onClick={e => e.stopPropagation()}>
             <div className="hr-debug-modal-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '1.1rem' }}>⚙️</span>
+                <SettingOutlined style={{ fontSize: '1.1rem' }} />
                 <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>Dữ liệu thô từ Database (Select All)</h4>
               </div>
               <button 
                 className="hr-btn hr-btn-subtle" 
                 style={{ padding: '4px 8px' }}
                 onClick={() => setDebugData(null)}
+                title="Đóng"
+                aria-label="Đóng"
               >
-                ✕
+                <CloseOutlined />
               </button>
             </div>
             <pre className="hr-debug-pre">{debugData}</pre>

@@ -6,7 +6,7 @@ export const probationContractTemplate: DraftingTemplate = {
   category: 'thoathuan',
   categoryLabel: 'Ghi nhận & Thỏa thuận',
   track: 'nd30_administrative',
-  icon: '📝',
+  icon: 'form',
   description: 'Hợp đồng thử việc chuẩn theo Bộ luật Lao động 2019 và thể thức văn bản hiện đại.',
   defaultData: {
     companyName: '[Tên công ty]',

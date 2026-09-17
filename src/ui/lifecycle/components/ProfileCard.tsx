@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { usePrivosContext } from '@privos_ai/app-react';
+import { CheckOutlined, CopyOutlined, SendOutlined } from '@ant-design/icons';
 import { EmployeeProfile, KANBAN_COLUMNS } from '../types';
 import { getInitials, calculateTimelineInfo } from '../utils';
 import { EmailComposerModal } from './EmailComposerModal';
@@ -150,18 +151,11 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
                   type="button" 
                   className={`hr-icon-btn ${copiedField === 'phone' ? 'copied' : ''}`}
                   onClick={(e) => copyToClipboard(profile.phone!, 'phone', e)}
-                  title="Sao chép SĐT"
+                  title={copiedField === 'phone' ? 'Đã chép SĐT' : 'Sao chép SĐT'}
+                  aria-label={copiedField === 'phone' ? 'Đã chép SĐT' : 'Sao chép SĐT'}
                 >
-                  {copiedField === 'phone' ? 'Đã chép' : 'Chép'}
+                  {copiedField === 'phone' ? <CheckOutlined /> : <CopyOutlined />}
                 </button>
-                <a 
-                  href={`tel:${profile.phone}`} 
-                  className="hr-icon-btn" 
-                  title="Gọi ngay"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Gọi
-                </a>
               </div>
             </div>
           )}
@@ -183,20 +177,22 @@ export function ProfileCard({ profile, onMoveProfile }: ProfileCardProps) {
                   type="button" 
                   className={`hr-icon-btn ${copiedField === 'email' ? 'copied' : ''}`}
                   onClick={(e) => copyToClipboard(profile.email!, 'email', e)}
-                  title="Sao chép Email"
+                  title={copiedField === 'email' ? 'Đã chép Email' : 'Sao chép Email'}
+                  aria-label={copiedField === 'email' ? 'Đã chép Email' : 'Sao chép Email'}
                 >
-                  {copiedField === 'email' ? 'Đã chép' : 'Chép'}
+                  {copiedField === 'email' ? <CheckOutlined /> : <CopyOutlined />}
                 </button>
-                <button 
+                <button
                   type="button"
-                  className="hr-icon-btn" 
+                  className="hr-icon-btn"
                   title="Gửi Email"
+                  aria-label="Gửi Email"
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsEmailModalOpen(true);
                   }}
                 >
-                  Gửi
+                  <SendOutlined />
                 </button>
               </div>
             </div>

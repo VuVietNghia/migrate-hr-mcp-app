@@ -6,7 +6,7 @@ export const submissionProposalTemplate: DraftingTemplate = {
   category: 'kehoach',
   categoryLabel: 'Kế hoạch & Báo cáo',
   track: 'nd30_administrative',
-  icon: '📑',
+  icon: 'fileDone',
   description: 'Tờ trình trình cấp có thẩm quyền phê duyệt chủ trương, kinh phí hoặc phương án công tác chuẩn NĐ 30.',
   defaultData: {
     companyName: '[Tên công ty]',

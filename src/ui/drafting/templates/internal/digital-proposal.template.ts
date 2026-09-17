@@ -6,7 +6,7 @@ export const digitalProposalTemplate: DraftingTemplate = {
   category: 'kehoach',
   categoryLabel: 'Kế hoạch & Báo cáo',
   track: 'modern_enterprise',
-  icon: '💡',
+  icon: 'bulb',
   description: 'Bản đề xuất giải pháp công nghệ, lộ trình và phân tích hiệu quả tài chính (ROI) hiện đại.',
   defaultData: {
     projectName: 'Ứng dụng AI vào Tự động hóa Quy trình Tuyển dụng & Quản trị Nhân sự',

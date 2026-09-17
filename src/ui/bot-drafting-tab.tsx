@@ -1,6 +1,30 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { usePrivosApp, usePrivosContext, type McpApp } from '@privos_ai/app-react';
 import {
+  AuditOutlined,
+  BarChartOutlined,
+  BookOutlined,
+  BulbOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  CloseOutlined,
+  CloudUploadOutlined,
+  CopyOutlined,
+  DownloadOutlined,
+  EditOutlined,
+  FileDoneOutlined,
+  FileTextOutlined,
+  FileWordOutlined,
+  FormOutlined,
+  MailOutlined,
+  MinusOutlined,
+  NotificationOutlined,
+  PlusOutlined,
+  ScheduleOutlined,
+  SendOutlined,
+  TrophyOutlined,
+} from '@ant-design/icons';
+import {
   IDraftingTemplateProvider,
   BuiltinTemplateProvider,
   CompanyContextProvider,
@@ -8,13 +32,28 @@ import {
   buildDraftingAIPrompt,
   buildGenericDraftingAIPrompt
 } from './drafting-templates';
-import type { DraftingTemplate, ICompanyContextProvider } from './drafting/types';
+import type { DraftingTemplate, DraftingTemplateIcon, ICompanyContextProvider } from './drafting/types';
 import { PipelineService } from './pipeline-service';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
 import { createOrUpdateFile } from './privos-rest';
 import { DocxExportService } from './docx-export-service';
 import './hr-premium-styles.css';
 import './bot-drafting.css';
+
+const TEMPLATE_ICONS: Record<DraftingTemplateIcon, React.ReactNode> = {
+  mail: <MailOutlined />,
+  form: <FormOutlined />,
+  trophy: <TrophyOutlined />,
+  bulb: <BulbOutlined />,
+  schedule: <ScheduleOutlined />,
+  notification: <NotificationOutlined />,
+  edit: <EditOutlined />,
+  barChart: <BarChartOutlined />,
+  send: <SendOutlined />,
+  audit: <AuditOutlined />,
+  fileDone: <FileDoneOutlined />,
+  fileText: <FileTextOutlined />,
+};
 
 export interface BotDraftingTabProps {
   app?: McpApp | null;
@@ -352,7 +391,7 @@ export default function BotDraftingTab(props: BotDraftingTabProps) {
     <div className="hr-terminal-ui bot-drafting-ui">
       {toastMessage && (
         <div className="bot-toast-message">
-          <span>{toastMessage.includes('Lỗi') ? '❌' : '✅'}</span>
+          <span>{toastMessage.includes('Lỗi') ? <CloseCircleOutlined /> : <CheckCircleOutlined />}</span>
           {toastMessage}
         </div>
       )}
@@ -364,10 +403,10 @@ export default function BotDraftingTab(props: BotDraftingTabProps) {
         </div>
         <div className="header-actions">
            <button type="button" className="hr-btn hr-btn-accent" onClick={handleDownloadDocx}>
-             <span>💾</span> Xuất Word (.docx)
+             <FileWordOutlined /> Xuất Word (.docx)
            </button>
            <button type="button" className="hr-btn" onClick={handleSaveToPrivos}>
-             <span>☁️</span> Lưu PrivOS Room
+             <CloudUploadOutlined /> Lưu PrivOS Room
            </button>
         </div>
       </header>
@@ -389,7 +428,7 @@ export default function BotDraftingTab(props: BotDraftingTabProps) {
                  onClick={() => setIsTemplateModalOpen(true)}
                  disabled={isGenerating}
                >
-                 📚 Xem thư viện mẫu văn bản ({templates.length} mẫu)
+                 <BookOutlined /> Xem thư viện mẫu văn bản ({templates.length} mẫu)
                </button>
              </div>
              
@@ -428,36 +467,36 @@ export default function BotDraftingTab(props: BotDraftingTabProps) {
                 className={`bot-preview-tab-btn ${viewMode === 'a4' ? 'active' : ''}`}
                 onClick={() => setViewMode('a4')}
               >
-                📄 Bản in A4 chuẩn
+                <FileTextOutlined /> Bản in A4 chuẩn
               </button>
               <button
                 type="button"
                 className={`bot-preview-tab-btn ${viewMode === 'raw' ? 'active' : ''}`}
                 onClick={() => setViewMode('raw')}
               >
-                📝 Soạn thảo Markdown
+                <EditOutlined /> Soạn thảo Markdown
               </button>
             </div>
 
             {viewMode === 'a4' && (
               <div className="bot-zoom-controls">
-                <button type="button" className="bot-zoom-btn" onClick={handleZoomOut} title="Thu nhỏ">-</button>
+                <button type="button" className="bot-zoom-btn" onClick={handleZoomOut} title="Thu nhỏ" aria-label="Thu nhỏ"><MinusOutlined /></button>
                 <span onClick={handleZoomReset} style={{ cursor: 'pointer' }} title="Đặt về 100%">{zoomLevel}%</span>
-                <button type="button" className="bot-zoom-btn" onClick={handleZoomIn} title="Phóng to">+</button>
+                <button type="button" className="bot-zoom-btn" onClick={handleZoomIn} title="Phóng to" aria-label="Phóng to"><PlusOutlined /></button>
               </div>
             )}
 
             <div className="bot-action-buttons">
-              <button type="button" className="hr-btn" onClick={handleCopy} title="Sao chép nội dung">📋 Copy</button>
+              <button type="button" className="hr-btn" onClick={handleCopy} title="Sao chép nội dung"><CopyOutlined /> Copy</button>
               {/* Tạm ẩn: PrivOS sandbox có thể chặn hộp thoại in của trình duyệt. */}
-              <button type="button" className="hr-btn" onClick={handleDownloadMd} title="Tải file .md">📥 .md</button>
+              <button type="button" className="hr-btn" onClick={handleDownloadMd} title="Tải file .md"><DownloadOutlined /> .md</button>
             </div>
           </div>
 
           <div className="bot-preview-content">
             {!documentContent ? (
               <div className="bot-empty-state">
-                <div className="bot-empty-icon">📄</div>
+                <div className="bot-empty-icon"><FileTextOutlined /></div>
                 <p>Chưa có văn bản nào được soạn thảo.</p>
                 <p className="bot-empty-sub">Hãy nhập yêu cầu ở khung bên trái để AI bắt đầu tạo tài liệu.</p>
               </div>
@@ -494,8 +533,8 @@ export default function BotDraftingTab(props: BotDraftingTabProps) {
         <div className="bot-template-modal-overlay" onClick={() => setIsTemplateModalOpen(false)}>
           <div className="bot-template-modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="bot-template-modal-header">
-              <h3>📚 Thư viện Mẫu văn bản</h3>
-              <button className="bot-template-close-btn" onClick={() => setIsTemplateModalOpen(false)}>×</button>
+              <h3><BookOutlined /> Thư viện Mẫu văn bản</h3>
+              <button className="bot-template-close-btn" onClick={() => setIsTemplateModalOpen(false)} title="Đóng" aria-label="Đóng"><CloseOutlined /></button>
             </div>
             <div className="bot-template-modal-body">
               <aside className="bot-template-sidebar">
@@ -514,7 +553,7 @@ export default function BotDraftingTab(props: BotDraftingTabProps) {
                   {filteredTemplates.map(t => (
                     <div key={t.id} className="bot-template-card" onClick={() => handleSelectTemplate(t)}>
                       <div className="bot-template-card-header">
-                        <span className="bot-template-card-icon">{t.icon}</span>
+                        <span className="bot-template-card-icon">{TEMPLATE_ICONS[t.icon]}</span>
                         <h4 className="bot-template-card-title">{t.title}</h4>
                       </div>
                       <p className="bot-template-card-desc">{t.description}</p>

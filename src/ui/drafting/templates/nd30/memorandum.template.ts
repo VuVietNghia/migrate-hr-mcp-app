@@ -6,7 +6,7 @@ export const memorandumTemplate: DraftingTemplate = {
   category: 'thoathuan',
   categoryLabel: 'Ghi nhận & Thỏa thuận',
   track: 'nd30_administrative',
-  icon: '📄',
+  icon: 'fileText',
   description: 'Mẫu Bản ghi nhớ (Memorandum) chuẩn thể thức Nghị định 30/2020/NĐ-CP.',
   defaultData: {
     companyName: '[Tên công ty]',

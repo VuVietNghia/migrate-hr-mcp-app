@@ -6,7 +6,7 @@ export const noticeSlipTemplate: DraftingTemplate = {
   category: 'phutro',
   categoryLabel: 'Biểu mẫu Phụ trợ',
   track: 'nd30_administrative',
-  icon: '📄',
+  icon: 'fileText',
   description: 'Mẫu Phiếu báo (Notice Slip) chuẩn thể thức Nghị định 30/2020/NĐ-CP.',
   defaultData: {
     companyName: '[Tên công ty]',
