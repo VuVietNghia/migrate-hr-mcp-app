@@ -842,6 +842,10 @@ ${content}
     throw new Error('AI polling timeout sau 10 phút');
   }
 
+  /**
+   * Takes the saved FILE name, extension included. A Kanban card title will not do: card titles drop
+   * `.md` (see `formatKanbanItemTitle`), and every path below is built from the name verbatim.
+   */
   async getMarkdownContent(normalizedName: string): Promise<string> {
     const baseName = normalizedName.split('/').pop()?.split('\\').pop() || normalizedName;
 

@@ -21,6 +21,16 @@ const base = {
   cvListId: 'l1',
 };
 
+/**
+ * Failures come back as an MCP `isError` result, not a throw: a thrown Error reaches the UI as the
+ * SDK's bare "Internal error", which hid the real reason for every failed send.
+ */
+async function expectToolError(call: Promise<unknown>, reason: string): Promise<void> {
+  const result = (await call) as { isError?: boolean; content: Array<{ text: string }> };
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain(reason);
+}
+
 describe('hrm.mail.* tools', () => {
   let send: ReturnType<typeof vi.fn>;
   let retry: ReturnType<typeof vi.fn>;
@@ -38,22 +48,35 @@ describe('hrm.mail.* tools', () => {
   });
 
   it('fails closed without a verified actor', async () => {
-    await expect(handleMailTool('hrm.mail.send', base, undefined)).rejects.toThrow('verified caller identity');
+    await expectToolError(handleMailTool('hrm.mail.send', base, undefined), 'verified caller identity');
     expect(send).not.toHaveBeenCalled();
   });
 
   it('rejects a mismatched roomId', async () => {
-    await expect(handleMailTool('hrm.mail.send', { ...base, roomId: 'room-2' }, actor)).rejects.toThrow('does not match');
+    await expectToolError(handleMailTool('hrm.mail.send', { ...base, roomId: 'room-2' }, actor), 'does not match');
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('validates recipient, subject, source and size', async () => {
-    await expect(handleMailTool('hrm.mail.send', { ...base, toEmail: 'nope' }, actor)).rejects.toThrow(
-      'Recipient email is invalid',
-    );
-    await expect(handleMailTool('hrm.mail.send', { ...base, subject: '' }, actor)).rejects.toThrow('subject is required');
-    await expect(handleMailTool('hrm.mail.send', { ...base, source: 'other' }, actor)).rejects.toThrow('source must be');
-    await expect(handleMailTool('hrm.mail.send', { ...base, htmlContent: 'x'.repeat(200_001) }, actor)).rejects.toThrow(
+    await expectToolError(handleMailTool('hrm.mail.send', { ...base, toEmail: 'nope' }, actor), 'Recipient email is invalid');
+    await expectToolError(handleMailTool('hrm.mail.send', { ...base, subject: '' }, actor), 'subject is required');
+    await expectToolError(handleMailTool('hrm.mail.send', { ...base, source: 'other' }, actor), 'source must be');
+    await expectToolError(
+      handleMailTool('hrm.mail.send', { ...base, htmlContent: 'x'.repeat(200_001) }, actor),
       'htmlContent exceeds',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the real delivery failure instead of a bare "Internal error"', async () => {
+    const deliver = vi.fn(async () => {
+      throw new Error('EmailJS rejected the message (429)');
+    });
+    setMailToolDependencies({ createTrackedMail: () => ({ send, retry, deliver }) as never });
+
+    await expectToolError(
+      handleMailTool('hrm.mail.send', { ...base, recordHistory: false }, actor),
+      'EmailJS rejected the message (429)',
     );
   });
 
@@ -104,11 +127,11 @@ describe('hrm.mail.* tools', () => {
   });
 
   it('rejects a non-boolean recordHistory', async () => {
-    await expect(handleMailTool('hrm.mail.send', { ...base, recordHistory: 'no' }, actor)).rejects.toThrow('recordHistory');
+    await expectToolError(handleMailTool('hrm.mail.send', { ...base, recordHistory: 'no' }, actor), 'recordHistory');
   });
 
   it('retry requires itemId and uses the actor room', async () => {
-    await expect(handleMailTool('hrm.mail.retry', {}, actor)).rejects.toThrow('itemId is required');
+    await expectToolError(handleMailTool('hrm.mail.retry', {}, actor), 'itemId is required');
     await handleMailTool('hrm.mail.retry', { itemId: 'I1', roomId: 'room-1' }, actor);
     expect(retry).toHaveBeenCalledWith('room-1', 'I1');
   });

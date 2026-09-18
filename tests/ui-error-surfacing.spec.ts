@@ -80,3 +80,29 @@ describe('SCOPES.md db:write justification matches the code', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('CVScoredTab reports the invite-mail flow without alert()', () => {
+  const tab = source('src/ui/cv-scored/CVScoredTab.tsx');
+
+  it('never calls alert(), which the Hub iframe drops silently', () => {
+    // The Hub sandboxes the iframe without `allow-modals`: every `alert()` is ignored and only
+    // logs "Ignored call to 'alert()'" to the console, so the operator saw nothing at all.
+    // Comments are stripped first — they name `alert()` to explain why it is banned.
+    const code = tab.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(code).not.toMatch(/(^|[^.\w])alert\(/m);
+  });
+
+  it('renders a toast element for those messages', () => {
+    expect(tab).toContain('cv-invite-toast');
+    expect(tab).toContain('{inviteToast.message}');
+  });
+
+  it('tells the operator the mail is on its way when the modal closes', () => {
+    const handler = tab.slice(tab.indexOf('const handleSendInviteEmail = '));
+    expect(handler.slice(0, handler.indexOf('\n  };'))).toContain('Email đang được gửi tới');
+  });
+
+  it('styles the toast, unlike the unstyled pl-toast it was modelled on', () => {
+    expect(source('src/ui/hr-premium-styles.css')).toContain('.cv-invite-toast {');
+  });
+});

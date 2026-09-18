@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeftOutlined,
   CalendarOutlined,
@@ -7,10 +7,12 @@ import {
   CloseCircleOutlined,
   DeleteOutlined,
   FileTextOutlined,
+  LeftOutlined,
   MailOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ReloadOutlined,
+  RightOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
 
@@ -23,6 +25,13 @@ import type {
   EmailSourceFilter,
 } from '../../services/mail/email-history-model';
 import { canDeleteEmail, canRetryEmail, filterEmailHistory } from '../../services/mail/email-history-model';
+import {
+  clampPage,
+  describePageRange,
+  getConcatenatedPageWindows,
+  getPageCount,
+  getPageSlice,
+} from './email-pagination';
 import { InterviewEmailTemplatePanel } from '../email-templates/InterviewEmailTemplatePanel';
 import type { IInterviewEmailTemplateRepository } from '../email-templates/interview-email-template-repository';
 import {
@@ -113,6 +122,48 @@ function formatTimestamp(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(timestamp);
+}
+
+interface EmailPagerProps {
+  page: number;
+  pageCount: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}
+
+/** Hidden while everything fits on one page: there is nothing to step through. */
+export function EmailPager({ page, pageCount, total, onPageChange }: EmailPagerProps) {
+  if (pageCount <= 1) return null;
+  return (
+    <nav className="email-pager" aria-label="Phân trang">
+      <span className="email-pager-range">{describePageRange(total, page)}</span>
+      <div className="email-pager-controls">
+        <button
+          type="button"
+          className="email-action-btn"
+          aria-label="Trang trước"
+          disabled={page <= 0}
+          onClick={() => onPageChange(page - 1)}
+        >
+          <LeftOutlined />
+          Trước
+        </button>
+        <span className="email-pager-status" aria-live="polite">
+          Trang {page + 1} / {pageCount}
+        </span>
+        <button
+          type="button"
+          className="email-action-btn"
+          aria-label="Trang sau"
+          disabled={page >= pageCount - 1}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Sau
+          <RightOutlined />
+        </button>
+      </div>
+    </nav>
+  );
 }
 
 interface EmailDateFilterDialogProps {
@@ -258,6 +309,48 @@ export function EmailMailboxView({
     };
     return { cv_scored: track('cv_scored'), lifecycle: track('lifecycle') };
   }, []);
+
+  // Paging. The page belongs to whatever is being browsed: changing the section, source, search or
+  // dates starts again at page 1. Deriving the reset from `pageScope` (instead of an effect that sets
+  // the page back) means the old page number is never rendered against the new list, not even once.
+  const listRef = useRef<HTMLDivElement>(null);
+  const pageScope = JSON.stringify([filter, sourceFilter, templateFilter, query, dateRange.from, dateRange.to]);
+  const [paging, setPaging] = useState({ scope: pageScope, page: 0 });
+  const requestedPage = paging.scope === pageScope ? paging.page : 0;
+  const goToPage = (page: number) => {
+    setPaging({ scope: pageScope, page });
+    listRef.current?.scrollIntoView({ block: 'start' });
+  };
+
+  const recordPageCount = getPageCount(visibleRecords.length);
+  const recordPage = clampPage(requestedPage, recordPageCount);
+  const pagedRecords = getPageSlice(visibleRecords, recordPage);
+
+  // Each panel reports how many templates pass the search; the mailbox pages over their sum.
+  const [templateVisibleCounts, setTemplateVisibleCounts] = useState<ByTemplateCategory<number>>({
+    cv_scored: 0,
+    lifecycle: 0,
+  });
+  const visibleCountCallbacks = useMemo<ByTemplateCategory<(count: number) => void>>(() => {
+    const track = (category: EmailTemplateCategory) => (count: number) => {
+      setTemplateVisibleCounts(current => current[category] === count ? current : { ...current, [category]: count });
+    };
+    return { cv_scored: track('cv_scored'), lifecycle: track('lifecycle') };
+  }, []);
+  const pagedCategories = showsTemplates
+    ? templatePanels.filter(({ category }) => isTemplateCategoryVisible(templateFilter, category))
+    : [];
+  const templateTotal = pagedCategories.reduce((sum, { category }) => sum + templateVisibleCounts[category], 0);
+  const templatePageCount = getPageCount(templateTotal);
+  const templatePage = clampPage(requestedPage, templatePageCount);
+  const templateWindows = getConcatenatedPageWindows(
+    pagedCategories.map(({ category }) => templateVisibleCounts[category]),
+    templatePage,
+  );
+  const templateWindowFor = (category: EmailTemplateCategory) =>
+    templateWindows[pagedCategories.findIndex(entry => entry.category === category)];
+  // A panel showing a template or the create form is not browsing its list, so paging stops.
+  const templateEditing = editingCategory !== null && isTemplateCategoryVisible(templateFilter, editingCategory);
 
   return (
     <section className="email-mailbox" aria-label="Quản lý email">
@@ -413,14 +506,27 @@ export function EmailMailboxView({
               ))}
             </aside>
 
-            <div className="email-message-list" aria-label={isTemplateMode ? 'Danh sách mẫu email' : 'Danh sách email'}>
+            <div
+              ref={listRef}
+              className="email-message-list"
+              aria-label={isTemplateMode ? 'Danh sách mẫu email' : 'Danh sách email'}
+            >
               {templateRepositories && templatePanels.map(({ category }) => {
                 const visible = showsTemplates && isTemplateCategoryVisible(templateFilter, category);
                 const hiddenByOtherForm = templateFilter === 'all'
                   && editingCategory !== null
                   && editingCategory !== category;
+                const pageWindow = visible ? templateWindowFor(category) : undefined;
+                // Nothing of this panel falls on the page. Still shown when it is the panel being
+                // edited, or when it is empty: its "no templates", loading or error state belongs
+                // on the first page. It stays mounted either way, so it keeps reporting its count.
+                const hiddenByPage = visible
+                  && editingCategory !== category
+                  && pageWindow !== undefined
+                  && pageWindow.start === pageWindow.end
+                  && !(templateVisibleCounts[category] === 0 && templatePage === 0);
                 return (
-                  <div key={category} hidden={!visible || hiddenByOtherForm}>
+                  <div key={category} hidden={!visible || hiddenByOtherForm || hiddenByPage}>
                     <InterviewEmailTemplatePanel
                       repository={templateRepositories[category]}
                       category={category}
@@ -430,10 +536,20 @@ export function EmailMailboxView({
                       onCountChange={templatePanelCallbacks[category].onCountChange}
                       onReadyChange={templatePanelCallbacks[category].onReadyChange}
                       onEditingChange={editingCallbacks[category]}
+                      pageWindow={pageWindow}
+                      onVisibleCountChange={visibleCountCallbacks[category]}
                     />
                   </div>
                 );
               })}
+              {showsTemplates && !templateEditing && (
+                <EmailPager
+                  page={templatePage}
+                  pageCount={templatePageCount}
+                  total={templateTotal}
+                  onPageChange={goToPage}
+                />
+              )}
               {contentMode === 'template-unavailable' && (
                 <div className="email-empty-state">Không thể truy cập mẫu email</div>
               )}
@@ -444,7 +560,7 @@ export function EmailMailboxView({
               {!loading && visibleRecords.length === 0 && (
                 <div className="email-empty-state">Không có email nào trong mục này</div>
               )}
-              {visibleRecords.map(record => (
+              {pagedRecords.map(record => (
                 <button
                   type="button"
                   key={record.id}
@@ -467,6 +583,12 @@ export function EmailMailboxView({
                   <time dateTime={record.updatedAt}>{formatTimestamp(record.updatedAt)}</time>
                 </button>
               ))}
+              <EmailPager
+                page={recordPage}
+                pageCount={recordPageCount}
+                total={visibleRecords.length}
+                onPageChange={goToPage}
+              />
               </>}
             </div>
           </div>

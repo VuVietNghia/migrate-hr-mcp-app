@@ -93,7 +93,26 @@ function optionalString(args: Record<string, unknown>, key: string, max = 256): 
 	return value;
 }
 
+/**
+ * A thrown `Error` reaches the operator as the SDK's bare "Internal error" (-32603): the SDK keeps a
+ * thrown message only for JSON-RPC protocol codes. That hid every real mail failure — an EmailJS
+ * rejection, a timeout, a missing EMAILJS_* variable all read the same. A tool-level failure is
+ * returned as an MCP `isError` result instead, whose text `parseToolResult` rethrows in the UI.
+ *
+ * Every message that can land here is already safe to show: the relay deliberately drops EmailJS's
+ * response body (it can echo the access token) and names missing variables, never their values.
+ */
 export async function handleMailTool(name: MailToolName, rawArgs: unknown, actor: VerifiedActor | undefined) {
+	try {
+		return await runMailTool(name, rawArgs, actor);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		console.error('[hrm.mail] THẤT BẠI', { tool: name, reason });
+		return { content: [{ type: 'text' as const, text: reason }], isError: true };
+	}
+}
+
+async function runMailTool(name: MailToolName, rawArgs: unknown, actor: VerifiedActor | undefined) {
 	const args = asRecord(rawArgs);
 	const roomId = resolveActorRoom(args, actor);
 	const tracked = dependencies.createTrackedMail(roomId);

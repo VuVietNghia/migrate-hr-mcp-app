@@ -40,11 +40,21 @@ describe('CVScoredTab routes every stage move through the checked helpers', () =
     expect(handleMove).toContain('await moveCVToStage(app, id, stageId);');
   });
 
-  it('calls moveInvitedCVToPendingStage inside handleSendInviteEmail', () => {
+  // The send no longer blocks the modal, so the post-send steps live in `finishInviteSend`, which
+  // `handleSendInviteEmail` hands off to. Both halves of that chain are asserted.
+  it('calls moveInvitedCVToPendingStage inside finishInviteSend', () => {
+    const start = tab.indexOf('const finishInviteSend = ');
+    const end = tab.indexOf('\n  };', start);
+    expect(start).toBeGreaterThan(-1);
+    const finishInviteSend = tab.slice(start, end);
+    expect(finishInviteSend).toContain('await moveInvitedCVToPendingStage(');
+  });
+
+  it('hands the invite send off to finishInviteSend', () => {
     const start = tab.indexOf('const handleSendInviteEmail = ');
     const end = tab.indexOf('\n  };', start);
     expect(start).toBeGreaterThan(-1);
     const handleSendInviteEmail = tab.slice(start, end);
-    expect(handleSendInviteEmail).toContain('await moveInvitedCVToPendingStage(');
+    expect(handleSendInviteEmail).toContain('finishInviteSend(cv, selectedBoard, request)');
   });
 });
