@@ -19,10 +19,20 @@ const LEGACY_LIST_COLUMNS: CVKanbanColumn[] = [
   { status: '07_CV_Cu', label: 'CV cũ', color: '#9ca3af' },
 ];
 
-export function getCVColumnsForStages(stagesMap: Record<string, string>): CVKanbanColumn[] {
-  return Object.values(stagesMap).includes('09_CV_Cu')
-    ? NEW_LIST_COLUMNS
-    : LEGACY_LIST_COLUMNS;
+const INBOX_STATUS = '01_Dau_Vao';
+
+// Tach rieng khoi NEW_LIST_COLUMNS: LEGACY_LIST_COLUMNS dung slice(0, 4) tren mang do.
+const INBOX_COLUMN: CVKanbanColumn = { status: INBOX_STATUS, label: 'Đầu vào', color: '#6b7280' };
+
+export function getCVColumnsForStages(
+  stagesMap: Record<string, string>,
+  hasInboxCards = false,
+): CVKanbanColumn[] {
+  const stageNames = Object.values(stagesMap);
+  const baseColumns = stageNames.includes('09_CV_Cu') ? NEW_LIST_COLUMNS : LEGACY_LIST_COLUMNS;
+  return hasInboxCards || stageNames.includes(INBOX_STATUS)
+    ? [INBOX_COLUMN, ...baseColumns]
+    : baseColumns;
 }
 
 export function getInterviewPendingStageId(stagesMap: Record<string, string>): string | undefined {
@@ -30,7 +40,8 @@ export function getInterviewPendingStageId(stagesMap: Record<string, string>): s
 }
 
 export function getCVColumnLabel(stagesMap: Record<string, string>, status: string): string | undefined {
-  return getCVColumnsForStages(stagesMap).find((column) => column.status === status)?.label;
+  return getCVColumnsForStages(stagesMap, status === INBOX_STATUS)
+    .find((column) => column.status === status)?.label;
 }
 
 export function canShowInviteMailButton(status: string, isInviteSent: boolean): boolean {

@@ -225,7 +225,7 @@ export function CVBoard({
 }) {
   const boardRef = React.useRef<HTMLDivElement>(null);
   const [isCollapsed, setIsCollapsed] = React.useState(true);
-  const columns = getCVColumnsForStages(board.stagesMap);
+  const columns = getCVColumnsForStages(board.stagesMap, board.cvs.some((cv) => cv.status === '01_Dau_Vao'));
 
   const scrollOneColumn = (direction: -1 | 1) => {
     const container = boardRef.current;
