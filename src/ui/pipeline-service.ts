@@ -8,6 +8,7 @@ import cvEvaluatorSkillRaw from './data/cv-evaluator-skill.md?raw';
 import jdTemplateRaw from './data/jd_template.md?raw';
 import jdGeneratorSkillRaw from './data/jd-generator-skill.md?raw';
 import { buildCandidateMarkdownFileName, extractCandidateNameFromMarkdown, formatKanbanItemTitle } from './pipeline-candidate-name';
+import { moveCVToStage } from './cv-scored/cv-stage-move';
 import { readParsedCvText, stripCvContentTags } from './parsed-cv-text';
 import {
   reconcileMarkdownAssessment,
@@ -1159,24 +1160,30 @@ ${content}
         }
       }
 
-      // Explicitly move items to their correct stages because batchCreateItems places them all in the first column
-      const createdItems = batchRes?.items || [];
-      for (let i = 0; i < createdItems.length; i++) {
-        const item = createdItems[i];
-        const intendedStageId = items[i]?.stageId;
-        if (intendedStageId && item._id) {
-          try {
-            await this.app.callServerTool({
-              name: 'mcpapp.lists.moveItemToStage',
-              arguments: { itemId: item._id, stageId: intendedStageId }
-            });
-          } catch (e) {
-            console.warn(`Failed to move item ${item._id} to stage ${intendedStageId}`);
-          }
+      // batchCreateItems dat moi the vao stage dau tien (01_Dau_Vao). The nao khong chuyen duoc
+      // se nam lai o do; cot "Dau vao" tren board hien chung, log ben duoi neu ten.
+      const createdItems: Array<{ _id?: unknown }> = Array.isArray(batchRes?.items) ? batchRes.items : [];
+      const stuckTitles: string[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const { title, stageId: intendedStageId } = items[i];
+        const createdId = createdItems[i]?._id;
+        if (typeof createdId !== 'string' || createdId === '') {
+          stuckTitles.push(title);
+          continue;
+        }
+        try {
+          await moveCVToStage(this.app, createdId, intendedStageId);
+        } catch (e) {
+          console.warn(`Failed to move item ${createdId} to stage ${intendedStageId}`, e);
+          stuckTitles.push(title);
         }
       }
 
       const createdCount = createdItems.length || items.length;
+      if (stuckTitles.length > 0) {
+        if (onLog) onLog(`[Kanban] Đã tạo List "${listName}" và lưu ${createdCount} thẻ; ${stuckTitles.length} thẻ chưa chuyển được sang cột đích, đang nằm ở cột "Đầu vào": ${stuckTitles.join(', ')}`);
+        return;
+      }
       if (onLog) onLog(`[Kanban] ✅ Đã tạo List "${listName}" và lưu ${createdCount} thẻ ứng viên vào đúng stage.`);
     } catch (err: any) {
       if (onLog) onLog(`[Kanban] Lỗi khi tạo Kanban: ${err.message}`);

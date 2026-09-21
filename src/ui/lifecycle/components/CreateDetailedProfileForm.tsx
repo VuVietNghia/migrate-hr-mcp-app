@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import {
   CheckCircleOutlined,
@@ -16,6 +16,7 @@ import { renderEmployeeMd } from '../employee-md-document';
 import { PHONE_REGEX } from '../profile-validation';
 import { DEPARTMENT_OPTIONS, POSITION_OPTIONS, withCurrentOption } from '../profile-form-options';
 import { isValidEmailAddress } from '../../utils/email-validation';
+import { isSelectedCandidateGone } from '../candidate-selection';
 
 interface CreateDetailedProfileFormProps {
   onSubmit: (data: Omit<EmployeeProfile, '_id' | 'status'> & { attachedFileObj?: any }) => Promise<void>;
@@ -33,16 +34,8 @@ function getDepartmentForPosition(position: string): string {
   return 'IT';
 }
 
-export function CreateDetailedProfileForm({
-  onSubmit,
-  onCancel,
-  passedCandidates = [],
-  isLoadingCandidates = false,
-}: CreateDetailedProfileFormProps) {
-  const app = usePrivosApp();
-  const { roomId } = usePrivosContext();
-
-  const [formData, setFormData] = useState({
+function createInitialFormData() {
+  return {
     fullName: '',
     email: '',
     phone: '',
@@ -64,10 +57,25 @@ export function CreateDetailedProfileForm({
     momoWallet: '',
     telegram: '',
     emergencyContact: '',
-  });
+  };
+}
+
+export function CreateDetailedProfileForm({
+  onSubmit,
+  onCancel,
+  passedCandidates = [],
+  isLoadingCandidates = false,
+}: CreateDetailedProfileFormProps) {
+  const app = usePrivosApp();
+  const { roomId } = usePrivosContext();
+
+  const [formData, setFormData] = useState(createInitialFormData);
 
   const [idPhoto, setIdPhoto] = useState<{ base64: string; filename: string; mimeType: string } | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>('');
+  // Tên ứng viên lúc chọn: khi họ bị kéo khỏi cột thì không còn trong passedCandidates để tra lại.
+  const selectedCandidateNameRef = useRef('');
+  const idPhotoInputRef = useRef<HTMLInputElement>(null);
 
   const fillMockData = () => {
     setFormData({
@@ -108,10 +116,12 @@ export function CreateDetailedProfileForm({
 
   const handleSelectCandidate = (candidateId: string) => {
     setSelectedCandidateId(candidateId);
+    selectedCandidateNameRef.current = '';
     if (!candidateId) return;
 
     const candidate = passedCandidates.find(c => c._id === candidateId);
     if (!candidate) return;
+    selectedCandidateNameRef.current = candidate.name;
 
     const matchedPosition = candidate.position || formData.position;
     const matchedDepartment = getDepartmentForPosition(matchedPosition);
@@ -125,6 +135,23 @@ export function CreateDetailedProfileForm({
       department: matchedDepartment
     }));
   };
+
+  // Polling ở LifecycleDashboard làm mới passedCandidates mỗi 3 giây. Ứng viên đang chọn biến
+  // mất nghĩa là đã bị kéo khỏi cột 05/08 (hoặc đã có hồ sơ): xoá toàn bộ dữ liệu đã nhập, vì
+  // các trường nhập tay cũng thuộc về người đó. Lúc đang lưu / vừa lưu, ứng viên tự rời danh sách
+  // do vừa có hồ sơ nên không reset.
+  useEffect(() => {
+    if (isSubmitting || isSuccess) return;
+    if (!isSelectedCandidateGone(selectedCandidateId, passedCandidates)) return;
+
+    const goneName = selectedCandidateNameRef.current;
+    selectedCandidateNameRef.current = '';
+    setSelectedCandidateId('');
+    setFormData(createInitialFormData());
+    setIdPhoto(null);
+    if (idPhotoInputRef.current) idPhotoInputRef.current.value = '';
+    setErrorMsg(`Ứng viên "${goneName}" đã bị chuyển khỏi cột Mời phỏng vấn / Đã phỏng vấn nên thông tin đã nhập được xoá.`);
+  }, [passedCandidates, selectedCandidateId, isSubmitting, isSuccess]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -322,7 +349,7 @@ export function CreateDetailedProfileForm({
           borderRadius: 8
         }}>
           <label className="hr-label" style={{ color: '#2563EB', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ThunderboltOutlined /> Chọn nhanh từ ứng viên phỏng vấn / nhận việc (Stage 05+) ({passedCandidates.length} ứng viên)
+            <ThunderboltOutlined /> Chọn nhanh từ ứng viên phỏng vấn / nhận việc (Stage 05, 08) ({passedCandidates.length} ứng viên)
           </label>
           <select
             className="hr-input"
@@ -331,7 +358,7 @@ export function CreateDetailedProfileForm({
             disabled={isSubmitting || isLoadingCandidates || isSuccess}
             style={{ marginTop: 6 }}
           >
-            <option value="">-- Chọn ứng viên từ vòng phỏng vấn (05_Moi_Phong_Van trở đi) --</option>
+            <option value="">-- Chọn ứng viên từ vòng phỏng vấn (05_Moi_Phong_Van, 08_Da_Phong_Van) --</option>
             {passedCandidates.map((c) => (
               <option key={c._id} value={c._id}>
                 {c.name} {c.score !== undefined ? `(${c.score}đ)` : ''} — Đợt: {c.listName} {c.position ? `[${c.position}]` : ''}
@@ -424,7 +451,7 @@ export function CreateDetailedProfileForm({
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label className="hr-label">Upload Ảnh CMND / Ảnh thẻ (Max 5MB)</label>
-            <input id="idPhotoInput" type="file" accept="image/*" onChange={handleFileChange} style={{ marginTop: '8px', display: 'block', fontSize: '14px' }} disabled={isSubmitting || isSuccess} />
+            <input id="idPhotoInput" ref={idPhotoInputRef} type="file" accept="image/*" onChange={handleFileChange} style={{ marginTop: '8px', display: 'block', fontSize: '14px' }} disabled={isSubmitting || isSuccess} />
           </div>
         </div>
 

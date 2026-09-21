@@ -33,29 +33,3 @@ export async function fetchScreeningListItems(
   });
   return items.filter((item) => !isSystemConfigItem(item)).reverse();
 }
-
-/**
- * Ảnh chụp trạng thái stage của một board để đối chiếu khi polling.
- * Thứ tự không ảnh hưởng gì ở đây vì kết quả là một Map tra theo id.
- */
-export async function readBoardStatuses(
-  app: ListItemPagingApp,
-  listId: string,
-  stagesMap: Record<string, string>,
-): Promise<Map<string, string>> {
-  const items = await fetchAllListItems(app, listId, {
-    missingId: 'skip',
-    maxPages: CV_LIST_MAX_PAGES,
-  });
-  const statuses = new Map<string, string>();
-
-  for (const item of items) {
-    const itemId = item._id || item.id;
-    const status = stagesMap[item.stageId]
-      || (typeof item.stage === 'string' ? item.stage : undefined)
-      || (typeof item.status === 'string' ? item.status : undefined);
-    if (itemId && status) statuses.set(itemId, status);
-  }
-
-  return statuses;
-}
