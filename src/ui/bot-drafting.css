@@ -6,12 +6,14 @@
 .bot-drafting-ui {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 120px);
+  height: calc(100vh - 60px);
+  min-height: 720px;
 }
 
 .bot-minimal-container {
   display: flex;
   flex: 1;
+  align-items: stretch; /* Chat & preview panels share the same height */
   gap: 20px;
   min-height: 0; /* Important for flex child scrolling */
   overflow: hidden;

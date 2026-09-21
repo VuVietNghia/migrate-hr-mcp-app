@@ -416,7 +416,7 @@ export default function BotDraftingTab(props: BotDraftingTabProps) {
         <section className="bot-chat-panel">
            <div className="bot-chat-header">
              <h3>Giao tiếp với AI</h3>
-             <span className="bot-chat-subtitle">Ngầm hiểu {templates.length} mẫu văn bản</span>
+             <span className="bot-chat-subtitle">Gồm {templates.length} mẫu văn bản</span>
            </div>
            
            <div className="bot-chat-body">
