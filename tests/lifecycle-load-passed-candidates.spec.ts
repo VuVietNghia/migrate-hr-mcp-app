@@ -65,3 +65,61 @@ describe('PrivOSLifecycleService.loadPassedCandidates', () => {
     expect(candidate.score).toBe(82);
   });
 });
+
+describe('PrivOSLifecycleService.loadPassedCandidates — lọc theo stage', () => {
+  const STAGES = [
+    { _id: 'stage-02', name: '02_Loai_CV' },
+    STAGE_INVITED,
+    { _id: 'stage-07', name: '07_Chua_Phong_Van' },
+    { _id: 'stage-08', name: '08_Da_Phong_Van' },
+  ];
+
+  async function loadCandidateIds(): Promise<string[]> {
+    const list = { _id: 'screening-1', name: 'SCREENING_BACKEND_DEVELOPER', stages: STAGES };
+    const items = STAGES.map((stage) => ({
+      _id: `cv-${stage._id}`,
+      name: `2026-09-18_CV_Ung_Vien_${stage._id}.md`,
+      stageId: stage._id,
+    }));
+    const app = createAppStub({
+      'mcpapp.lists.getAll': () => [list],
+      'mcpapp.lists.getItems': () => items,
+    });
+    // Stub chỉ cài đúng phần McpApp mà service dùng tới.
+    const service = new PrivOSLifecycleService(app as unknown as ConstructorParameters<typeof PrivOSLifecycleService>[0]);
+    const candidates = await service.loadPassedCandidates('room-1');
+    return candidates.map((c) => c._id).sort();
+  }
+
+  it('chỉ lấy ứng viên ở 05_Moi_Phong_Van và 08_Da_Phong_Van', async () => {
+    expect(await loadCandidateIds()).toEqual(['cv-stage-05', 'cv-stage-08']);
+  });
+});
+
+describe('PrivOSLifecycleService.loadPassedCandidates — lỗi', () => {
+  it('reject khi đọc item lỗi, không trả về danh sách rỗng', async () => {
+    // Trả [] khi lỗi làm form hiểu nhầm là ứng viên đã bị kéo khỏi cột và xoá dữ liệu đang nhập.
+    const app = createAppStub({
+      'mcpapp.lists.getAll': () => [{ _id: 'screening-1', name: 'SCREENING_BACKEND_DEVELOPER', stages: [STAGE_INVITED] }],
+      'mcpapp.lists.getItems': () => { throw new Error('hub down'); },
+    });
+    // Stub chỉ cài đúng phần McpApp mà service dùng tới.
+    const service = new PrivOSLifecycleService(app as unknown as ConstructorParameters<typeof PrivOSLifecycleService>[0]);
+    await expect(service.loadPassedCandidates('room-1')).rejects.toThrow('hub down');
+  });
+});
+
+describe('PrivOSLifecycleService.loadPassedCandidates — không lấy được stage', () => {
+  it('reject khi list không kèm stage và không tải được stage', async () => {
+    // Không có stage thì mọi thẻ rơi về stage mặc định, không qua bộ lọc 05/08, và form hiểu nhầm
+    // là ứng viên đang chọn đã bị kéo khỏi cột.
+    const app = createAppStub({
+      'mcpapp.lists.getAll': () => [{ _id: 'screening-1', name: 'SCREENING_BACKEND_DEVELOPER' }],
+      'mcpapp.stages.getByList': () => { throw new Error('hub down'); },
+      'mcpapp.lists.getItems': () => [{ _id: 'cv-1', name: '2026-09-18_CV_Ung_Vien.md', stageId: STAGE_INVITED._id }],
+    });
+    // Stub chỉ cài đúng phần McpApp mà service dùng tới.
+    const service = new PrivOSLifecycleService(app as unknown as ConstructorParameters<typeof PrivOSLifecycleService>[0]);
+    await expect(service.loadPassedCandidates('room-1')).rejects.toThrow('SCREENING_BACKEND_DEVELOPER');
+  });
+});

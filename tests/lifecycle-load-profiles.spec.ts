@@ -555,8 +555,8 @@ describe('PrivOSLifecycleService chi doc list SCREENING', () => {
   it('tra ve rong khi room khong co list SCREENING nao', async () => {
     const { app, calls } = createAppStub({
       'mcpapp.lists.getAll': () => [UNRELATED_LIST, HR_LIFECYCLE_LIST],
-      // Van khai bao handler nay: neu bo qua, loi "unexpected tool call" se bi
-      // `loadPassedCandidates` nuot va tra ve [] — test se pass vi ly do sai.
+      // Van khai bao handler nay: neu bo qua va service lo goi getItems, loi
+      // "unexpected tool call" lam test fail o `resolves` thay vi o assertion ben duoi.
       'mcpapp.lists.getItems': () => [CANDIDATE_ITEM],
     });
     const service = new PrivOSLifecycleService(app as never);

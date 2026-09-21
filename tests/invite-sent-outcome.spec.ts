@@ -29,6 +29,7 @@ function boardsFixture(): CVBoardData[] {
       listId: 'list-1',
       listName: 'Backend Dev',
       stagesMap: { 'stage-5': '05_Moi_Phong_Van', 'stage-7': '07_Chua_Phong_Van' },
+      fieldsMap: {},
       cvs: [
         { _id: 'cv-1', name: 'Nguyen Van A', status: '05_Moi_Phong_Van' },
         { _id: 'cv-2', name: 'Tran Thi B', status: '05_Moi_Phong_Van' },

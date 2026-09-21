@@ -1,18 +1,29 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import { parseToolResult, usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { UserOutlined } from '@ant-design/icons';
 import '../hr-premium-styles.css';
 import { getKanbanColumnScrollDistance } from './kanban-scroll';
 import { getInviteEmailValidationError } from './invite-email-validation';
 import { getInviteMailButtonState } from './invite-mail-status';
-import { markInviteMailSent, wasInviteMailSent, INVITE_MAIL_SENT_FIELD_ID } from './invite-mail-persistence';
+import { markInviteMailSent } from './invite-mail-persistence';
 import { canShowInviteMailButton, getCVColumnLabel, getCVColumnsForStages, getInterviewPendingStageId, type CVKanbanColumn } from './kanban-stages';
 import { restCall } from '../privos-rest';
 import { usePolling } from '../hooks/usePolling';
 import { CVBoardPollingGuard } from './polling-sync';
 import { moveCVToStage } from './cv-stage-move';
 import { applyInviteSentToBoards, buildInviteSentMessage, moveInvitedCVToPendingStage } from './invite-sent-outcome';
-import { fetchScreeningListItems, readBoardStatuses } from './cv-list-reader';
+import { fetchScreeningListItems } from './cv-list-reader';
+import { mapItemsToCVProfiles } from './cv-item-mapper';
+import { areCvListsEqual, areStageMapsEqual } from './cv-poll-diff';
+import {
+  compareListsNewestFirst,
+  findNewLists,
+  readScreeningListIds,
+  readScreeningLists,
+  splitRemovedBoards,
+  type ScreeningListRef,
+} from './cv-list-presence';
+import { loadScreeningBoard } from './cv-board-loader';
 import { buildTrackedInviteEmailRequest } from './invite-email-request';
 import { UserSessionTrackedMail } from '../email-history/user-session-tracked-mail';
 import { createInterviewEmailTemplateRepository } from '../email-templates/interview-email-template-default';
@@ -207,6 +218,8 @@ export interface CVBoardData {
   listId: string;
   listName: string;
   stagesMap: Record<string, string>;
+  /** fieldId -> tên field; poll cần để đọc lại điểm, phân loại, email, SĐT. */
+  fieldsMap: Record<string, string>;
   cvs: CVProfile[];
 }
 
@@ -225,7 +238,7 @@ export function CVBoard({
 }) {
   const boardRef = React.useRef<HTMLDivElement>(null);
   const [isCollapsed, setIsCollapsed] = React.useState(true);
-  const columns = getCVColumnsForStages(board.stagesMap);
+  const columns = getCVColumnsForStages(board.stagesMap, board.cvs.some((cv) => cv.status === '01_Dau_Vao'));
 
   const scrollOneColumn = (direction: -1 | 1) => {
     const container = boardRef.current;
@@ -393,6 +406,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
   const [loadedInviteTemplateRepository, setLoadedInviteTemplateRepository] = useState<ActiveTemplateRepository | null>(null);
   const [inviteTemplateLoading, setInviteTemplateLoading] = useState(false);
   const [inviteTemplateError, setInviteTemplateError] = useState<string | null>(null);
+  const [boardNotice, setBoardNotice] = useState<string | null>(null);
 
   const inviteValidationError = getInviteEmailValidationError({
     candidateName: inviteCandidateName,
@@ -442,26 +456,37 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
         }),
       );
 
-      const updatedCustomFields = markInviteMailSent(selectedCVForInvite.customFields);
-      await restCall(app, 'POST', 'items.update', {
-        body: {
-          itemId: selectedCVForInvite._id,
-          name: selectedCVForInvite.name,
-          customFields: updatedCustomFields,
-        },
-      });
-      const stageMove = await moveInvitedCVToPendingStage(
-        app,
-        selectedCVForInvite._id,
-        getInterviewPendingStageId(selectedBoard.stagesMap),
-      );
-      if (stageMove.status === 'failed') {
-        console.error('[CVScoredTab] Đã gửi mail mời nhưng không chuyển được CV sang cột Chưa phỏng vấn:', stageMove.detail);
+      // Poll đang chạy có thể mang dữ liệu trước khi ghi cờ đã gửi mail / đổi cột, rồi đè lên cập
+      // nhật lạc quan bên dưới. Coi thao tác này như một lần kéo thẻ để guard chặn poll đó.
+      const inviteCvId = selectedCVForInvite._id;
+      const guardedInvite = pollingGuardRef.current.beginMove(inviteCvId);
+      try {
+        const updatedCustomFields = markInviteMailSent(selectedCVForInvite.customFields);
+        await restCall(app, 'POST', 'items.update', {
+          body: {
+            itemId: inviteCvId,
+            name: selectedCVForInvite.name,
+            customFields: updatedCustomFields,
+          },
+        });
+        const stageMove = await moveInvitedCVToPendingStage(
+          app,
+          inviteCvId,
+          getInterviewPendingStageId(selectedBoard.stagesMap),
+        );
+        if (stageMove.status === 'failed') {
+          console.error('[CVScoredTab] Đã gửi mail mời nhưng không chuyển được CV sang cột Chưa phỏng vấn:', stageMove.detail);
+        }
+        setSentInviteCVIds((previous) => new Set(previous).add(inviteCvId));
+        setBoards((previous) => applyInviteSentToBoards(previous, inviteCvId, updatedCustomFields, stageMove));
+        alert(buildInviteSentMessage({ targetEmail, logged, stageMove }));
+        setInviteModalOpen(false);
+      } finally {
+        if (guardedInvite) {
+          pollingGuardRef.current.endMove(inviteCvId);
+          void pollBoards(true);
+        }
       }
-      setSentInviteCVIds((previous) => new Set(previous).add(selectedCVForInvite._id));
-      setBoards((previous) => applyInviteSentToBoards(previous, selectedCVForInvite._id, updatedCustomFields, stageMove));
-      alert(buildInviteSentMessage({ targetEmail, logged, stageMove }));
-      setInviteModalOpen(false);
     } catch (err: any) {
       console.error('Lỗi gửi email:', err);
       alert('Lỗi gửi email: ' + (err.message || err));
@@ -553,14 +578,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
       // Get all screening lists and sort newest updated first
       const targetLists = allLists
         .filter((l: any) => (l.name || '').includes('SCREENING'))
-        .sort((a: any, b: any) => {
-          const tA = new Date(a.updatedAt || a.updated_at || a.createdAt || a.created_at || 0).getTime();
-          const tB = new Date(b.updatedAt || b.updated_at || b.createdAt || b.created_at || 0).getTime();
-          if (tA !== tB && tA > 0 && tB > 0) return tB - tA;
-          const idA = a._id || a.id || '';
-          const idB = b._id || b.id || '';
-          return idB.localeCompare(idA);
-        });
+        .sort(compareListsNewestFirst);
       
       if (targetLists.length === 0) {
         if (reqId === requestRef.current) {
@@ -572,149 +590,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
       const loadedBoards: CVBoardData[] = [];
 
       for (const targetList of targetLists) {
-        const lId = targetList._id || targetList.id;
-        
-        let sMap: Record<string, string> = {};
-        let fMap: Record<string, string> = {};
-        let hasInviteMailSentField = false;
-        
-        try {
-          const detailRes: any = await app.callServerTool({
-            name: 'mcpapp.lists.get',
-            arguments: { listId: lId }
-          });
-          const detailParsed = JSON.parse(detailRes?.content?.[0]?.text || '{}');
-          
-          let stagesArr = detailParsed.stages || detailParsed.list?.stages || targetList.stages || [];
-          
-          if (!stagesArr || stagesArr.length === 0) {
-            // Try to find the system config item
-            const searchRes: any = await app.callServerTool({
-              name: 'mcpapp.lists.searchItems',
-              arguments: { listId: lId, query: '[Hệ thống] Không xoá' }
-            });
-            const searchParsed = JSON.parse(searchRes?.content?.[0]?.text || '[]');
-            const configItem = searchParsed.find((i: any) => (i.name || i.title || '').includes('[Hệ thống] Không xoá'));
-            if (configItem && configItem.description) {
-              try { stagesArr = JSON.parse(configItem.description); } catch (e) {}
-            }
-          }
-
-          if (Array.isArray(stagesArr)) {
-            stagesArr.forEach((s: any) => sMap[s._id || s.id] = s.name);
-          }
-
-          const fieldsArr = detailParsed.fieldDefinitions || detailParsed.list?.fieldDefinitions || targetList.fieldDefinitions || [];
-          if (Array.isArray(fieldsArr)) {
-            fieldsArr.forEach((fd: any) => {
-              const fieldId = fd._id || fd.id;
-              fMap[fieldId] = fd.name;
-              if (fieldId === INVITE_MAIL_SENT_FIELD_ID) hasInviteMailSentField = true;
-            });
-
-            if (!hasInviteMailSentField) {
-              try {
-                await app.callServerTool({
-                  name: 'mcpapp.lists.addField',
-                  arguments: {
-                    listId: lId,
-                    fieldId: INVITE_MAIL_SENT_FIELD_ID,
-                    name: 'Đã gửi mail phỏng vấn',
-                    type: 'CHECKBOX',
-                  },
-                });
-                fMap[INVITE_MAIL_SENT_FIELD_ID] = 'Đã gửi mail phỏng vấn';
-              } catch (fieldError) {
-                console.warn('Không thể thêm field trạng thái gửi mail', fieldError);
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Failed to fetch full list details for stages", err);
-        }
-
-        const items = await fetchScreeningListItems(app, lId);
-
-        const loadedCvs: CVProfile[] = items.map((item: any) => {
-          let score, category, reason, email, sdt;
-          const inviteMailSent = wasInviteMailSent(item.customFields);
-          if (Array.isArray(item.customFields)) {
-            item.customFields.forEach((cf: any) => {
-              const fieldIdStr = cf.fieldId || cf.fieldDefinitionId;
-              const fieldName = (fMap[fieldIdStr] || fieldIdStr || '').toLowerCase();
-              if (fieldName.includes('tổng điểm') || fieldName.includes('tong_diem') || fieldName.includes('điểm')) score = cf.value;
-              else if (fieldName.includes('phân loại') || fieldName.includes('phan_loai') || fieldName.includes('loại')) category = cf.value;
-              else if (fieldName.includes('lý do') || fieldName.includes('ly_do') || fieldName.includes('nhận xét')) reason = cf.value;
-              else if (fieldName.includes('email') || fieldName.includes('thu_dien_tu')) email = cf.value;
-              else if (fieldName.includes('sdt') || fieldName.includes('sđt') || fieldName.includes('phone') || fieldName.includes('điện thoại')) sdt = cf.value;
-            });
-          } else if (item.customFields && typeof item.customFields === 'object') {
-            Object.keys(item.customFields).forEach(key => {
-              const fieldName = (fMap[key] || key || '').toLowerCase();
-              const val = item.customFields[key];
-              if (fieldName.includes('tổng điểm') || fieldName.includes('tong_diem') || fieldName.includes('điểm')) score = val;
-              else if (fieldName.includes('phân loại') || fieldName.includes('phan_loai') || fieldName.includes('loại')) category = val;
-              else if (fieldName.includes('lý do') || fieldName.includes('ly_do') || fieldName.includes('nhận xét')) reason = val;
-              else if (fieldName.includes('email') || fieldName.includes('thu_dien_tu')) email = val;
-              else if (fieldName.includes('sdt') || fieldName.includes('sđt') || fieldName.includes('phone') || fieldName.includes('điện thoại')) sdt = val;
-            });
-          }
-
-          // Fallback: scanner for candidate email if not present in customFields
-          const textToScan = `${item.name || ''} ${item.title || ''} ${reason || ''} ${item.description || ''}`;
-          if (!email) {
-            const gmailMatch = textToScan.match(/[a-zA-Z0-9._%+-]+@gmail\.com/i);
-            if (gmailMatch) {
-              email = gmailMatch[0].toLowerCase();
-            } else {
-              const generalMatch = textToScan.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i);
-              if (generalMatch) {
-                email = generalMatch[0].toLowerCase();
-              }
-            }
-          }
-
-          if (!sdt) {
-            const phoneMatch = textToScan.match(/(?:\+84|84|0)[35789][0-9\s\.\-]{8,12}\b/);
-            if (phoneMatch) {
-              sdt = phoneMatch[0].replace(/[^\d+]/g, '');
-            }
-          }
-
-          // Fallback deduce stageId if sMap is missing this specific stageId
-          if (!sMap[item.stageId] && item.stageId && category) {
-            const normalized = String(category || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/Đ/g, 'D').trim();
-            if (normalized.includes('SAI JD')) {
-              sMap[item.stageId] = '06_Sai_JD';
-            } else if (normalized.includes('KHONG DAT') || normalized.includes('KHONG TUYEN')) {
-              sMap[item.stageId] = '02_Loai_CV';
-            } else if (normalized.includes('DAT') || normalized.includes('CAN NHAC')) {
-              sMap[item.stageId] = '03_Tiem_Nang';
-            } else {
-              sMap[item.stageId] = '01_Dau_Vao';
-            }
-          }
-
-          return {
-            _id: item._id || item.id,
-            name: item.name || item.title || 'Không tên',
-            status: sMap[item.stageId] || item.stage || item.status || '01_Dau_Vao',
-            score,
-            category,
-            reason,
-            email: email || '',
-            sdt: sdt || '',
-            customFields: item.customFields,
-            inviteMailSent,
-          };
-        });
-
-        loadedBoards.push({
-          listId: lId,
-          listName: targetList.name,
-          stagesMap: sMap,
-          cvs: loadedCvs
-        });
+        loadedBoards.push(await loadScreeningBoard(app, targetList));
       }
       
       if (reqId === requestRef.current) {
@@ -738,56 +614,101 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
     void loadData();
   }, [loadData]);
 
-  const pollStageMoves = useCallback(async (required = false) => {
-    if (!app || boards.length === 0) return;
+  // Mỗi lần poll dựng lại toàn bộ board từ item trên Hub: thẻ mới xuất hiện, thẻ bị xoá biến mất,
+  // mọi field được làm mới. Chỉ setBoards khi có khác biệt để không re-render mỗi 3 giây.
+  const pollBoards = useCallback(async (required = false) => {
+    // Không thoát khi chưa có board: room trống vẫn phải phát hiện list đầu tiên được chấm.
+    if (!app || !roomId) return;
     const pollId = required
       ? pollingGuardRef.current.requestPoll()
       : pollingGuardRef.current.tryBeginPoll();
     if (pollId === null) return;
 
     try {
-      const snapshots = await Promise.all(boards.map(async (board) => {
-        const statuses = await readBoardStatuses(app, board.listId, board.stagesMap);
-        return { listId: board.listId, statuses };
+      // Hỏi Hub list nào đang có: list bị xoá ngoài app phải biến mất, list vừa tạo (ví dụ Pipeline
+      // chấm JD mới) phải hiện lên. Lần gọi hỏng (liveLists = null) thì bỏ qua cả hai bước.
+      let liveLists: ScreeningListRef[] | null = null;
+      try {
+        liveLists = readScreeningLists(parseToolResult(await app.callServerTool({
+          name: 'mcpapp.lists.getAll',
+          arguments: { roomId },
+        })));
+      } catch (error) {
+        console.error('[CVScoredTab] Không đọc được danh sách list khi đồng bộ:', error);
+      }
+      const liveIds = liveLists ? readScreeningListIds(liveLists) : null;
+      const { kept, removed } = liveIds ? splitRemovedBoards(boards, liveIds) : { kept: boards, removed: [] };
+
+      const newLists = liveLists ? findNewLists(liveLists, boards) : [];
+      const added = (await Promise.allSettled(newLists.map((list) => loadScreeningBoard(app, list))))
+        .flatMap((result) => {
+          if (result.status === 'fulfilled') return [result.value];
+          console.error('[CVScoredTab] Không tải được list mới, sẽ thử lại ở lần poll sau:', result.reason);
+          return [];
+        });
+
+      // allSettled: một list lỗi chỉ bỏ qua board đó ở lần poll này, không chặn các board khác.
+      const results = await Promise.allSettled(kept.map(async (board) => {
+        const items = await fetchScreeningListItems(app, board.listId);
+        return { listId: board.listId, ...mapItemsToCVProfiles(items, board.fieldsMap, board.stagesMap) };
       }));
+      const snapshots = results.flatMap((result) => {
+        if (result.status === 'fulfilled') return [result.value];
+        console.error('[CVScoredTab] Không thể đồng bộ board CV:', result.reason);
+        return [];
+      });
 
       if (!pollingGuardRef.current.canApplyPoll(pollId)) return;
-      const snapshotsByList = new Map(snapshots.map(snapshot => [snapshot.listId, snapshot.statuses]));
+      const removedIds = new Set(removed.map(board => board.listId));
+      const snapshotsByList = new Map(snapshots.map(snapshot => [snapshot.listId, snapshot]));
       setBoards((previous) => {
         let boardsChanged = false;
-        const nextBoards = previous.map((board) => {
-          const statuses = snapshotsByList.get(board.listId);
-          if (!statuses) return board;
-
-          let cvsChanged = false;
-          const cvs = board.cvs.map((cv) => {
-            const status = statuses.get(cv._id);
-            if (!status || status === cv.status) return cv;
-            cvsChanged = true;
-            return { ...cv, status };
-          });
-
-          if (!cvsChanged) return board;
+        const nextBoards = previous.flatMap((board) => {
+          if (removedIds.has(board.listId)) {
+            boardsChanged = true;
+            return [];
+          }
+          const snapshot = snapshotsByList.get(board.listId);
+          if (!snapshot) return [board];
+          if (
+            areCvListsEqual(board.cvs, snapshot.cvs)
+            && areStageMapsEqual(board.stagesMap, snapshot.stagesMap)
+          ) {
+            return [board];
+          }
           boardsChanged = true;
-          return { ...board, cvs };
+          return [{ ...board, stagesMap: snapshot.stagesMap, cvs: snapshot.cvs }];
         });
+        // Bỏ board đã có sẵn (loadData có thể vừa chạy xong); board mới lên đầu như khi bấm Làm mới.
+        const shownIds = new Set(nextBoards.map(board => board.listId));
+        const freshBoards = added.filter(board => !shownIds.has(board.listId));
+        if (freshBoards.length > 0) return [...freshBoards, ...nextBoards];
         return boardsChanged ? nextBoards : previous;
       });
+      const listNames = (changed: CVBoardData[]) => changed.map(board => `"${board.listName}"`).join(', ');
+      const notices: string[] = [];
+      if (removed.length > 0) {
+        notices.push(`List ${listNames(removed)} đã bị xoá khỏi Hub nên đã được gỡ khỏi màn hình.`);
+      }
+      if (added.length > 0) {
+        notices.push(`Đã thêm list ${listNames(added)} vừa được tạo trên Hub.`);
+      }
+      if (notices.length > 0) setBoardNotice(notices.join(' '));
     } catch (error) {
-      console.error('[CVScoredTab] Không thể đồng bộ stage CV:', error);
+      console.error('[CVScoredTab] Không thể đồng bộ board CV:', error);
     } finally {
       if (pollingGuardRef.current.finishPoll(pollId)) {
         pendingPollRunnerRef.current();
       }
     }
-  }, [app, boards]);
+  }, [app, boards, roomId]);
 
   useEffect(() => {
-    pendingPollRunnerRef.current = () => { void pollStageMoves(); };
-  }, [pollStageMoves]);
+    pendingPollRunnerRef.current = () => { void pollBoards(); };
+  }, [pollBoards]);
 
   usePolling(
-    pollStageMoves,
+    pollBoards,
     {
       enabled: active && Boolean(app && roomId),
       interval: 3000,
@@ -833,7 +754,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
       }
     } finally {
       pollingGuardRef.current.endMove(id);
-      void pollStageMoves(true);
+      void pollBoards(true);
     }
   };
 
@@ -872,6 +793,15 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
           </button>
         </div>
       </header>
+
+      {boardNotice && (
+        <div className="hr-status-banner hr-status-info" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+          <span>{boardNotice}</span>
+          <button type="button" className="hr-btn hr-btn-subtle" onClick={() => setBoardNotice(null)} aria-label="Đóng thông báo">
+            Đóng
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="kanban-loading">

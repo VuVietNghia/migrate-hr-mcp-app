@@ -36,43 +36,45 @@ export class PrivOSLifecycleService implements ILifecycleService {
   }
 
   async loadPassedCandidates(roomId: string): Promise<PassedCandidate[]> {
-    try {
-      const allLists = await this.fetchAllLists(roomId);
-      const screeningLists = allLists.filter(list => this.isScreeningList(list));
+    // Không nuốt lỗi thành []: form tạo hồ sơ coi "ứng viên không còn trong danh sách" là bị kéo
+    // khỏi cột và xoá dữ liệu đang nhập. Caller (refreshCandidates) tự catch và giữ danh sách cũ.
+    const allLists = await this.fetchAllLists(roomId);
+    const screeningLists = allLists.filter(list => this.isScreeningList(list));
 
-      console.log(`[PrivOSLifecycleService] Found ${allLists.length} lists in room, ${screeningLists.length} candidate lists:`,
-        screeningLists.map(l => l.name)
-      );
+    console.log(`[PrivOSLifecycleService] Found ${allLists.length} lists in room, ${screeningLists.length} candidate lists:`,
+      screeningLists.map(l => l.name)
+    );
 
-      if (screeningLists.length === 0) return [];
+    if (screeningLists.length === 0) return [];
 
-      const candidatesPromises = screeningLists.map(async (list) => {
-        const listId = list._id || list.id;
-        let stages = list.stages;
-        if (!Array.isArray(stages) || stages.length === 0) {
-          stages = await this.fetchListStages(listId);
-        }
+    const candidatesPromises = screeningLists.map(async (list) => {
+      const listId = list._id || list.id;
+      let stages = list.stages;
+      if (!Array.isArray(stages) || stages.length === 0) {
+        stages = await this.fetchListStages(listId);
+      }
+      // fetchListStages tự nuốt lỗi và trả []: không có stage thì mọi thẻ rơi về stage mặc định,
+      // không qua bộ lọc 05/08, và form hiểu nhầm là ứng viên đang chọn đã bị kéo khỏi cột.
+      if (stages.length === 0) {
+        throw new Error(`Không lấy được danh sách stage của list "${list.name}" (${listId}).`);
+      }
 
-        const items = await this.fetchListItems(listId);
-        const validItems = items.filter(item => !this.isSystemConfigItem(item));
-        const passedItems = validItems.filter(item => this.isPassedCandidateItem(item, stages));
+      const items = await this.fetchListItems(listId);
+      const validItems = items.filter(item => !this.isSystemConfigItem(item));
+      const passedItems = validItems.filter(item => this.isPassedCandidateItem(item, stages));
 
-        console.log(`[PrivOSLifecycleService] List "${list.name}" (${listId}): ${validItems.length} total items, ${passedItems.length} stage 05+ candidates`);
+      console.log(`[PrivOSLifecycleService] List "${list.name}" (${listId}): ${validItems.length} total items, ${passedItems.length} stage 05/08 candidates`);
 
-        return passedItems.map(item => this.mapItemToPassedCandidate(item, { ...list, stages }));
-      });
+      return passedItems.map(item => this.mapItemToPassedCandidate(item, { ...list, stages }));
+    });
 
-      const candidatesNested = await Promise.all(candidatesPromises);
-      const allCandidates = candidatesNested.flat();
+    const candidatesNested = await Promise.all(candidatesPromises);
+    const allCandidates = candidatesNested.flat();
 
-      console.log(`[PrivOSLifecycleService] Total loaded passed candidates (Stage 05+): ${allCandidates.length}`);
+    console.log(`[PrivOSLifecycleService] Total loaded passed candidates (Stage 05/08): ${allCandidates.length}`);
 
-      // Sort by score descending (highest score first)
-      return allCandidates.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-    } catch (err) {
-      console.error('[PrivOSLifecycleService] Error loading passed candidates:', err);
-      return [];
-    }
+    // Sort by score descending (highest score first)
+    return allCandidates.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   }
 
 
@@ -747,13 +749,17 @@ export class PrivOSLifecycleService implements ILifecycleService {
     const rawStageName = this.getStageName(item, stages || []);
     const stageName = this.normalizeText(rawStageName);
 
-    // CHỈ lấy ứng viên đang ở Stage 05 (Mời phỏng vấn)
+    // CHỈ lấy ứng viên đang ở Stage 05 (Mời phỏng vấn) hoặc Stage 08 (Đã phỏng vấn)
     // Dùng Regex ^05[_\s] để đảm bảo bắt buộc bắt đầu bằng 05_ hoặc 05 (tránh dính 105_)
-    const isStage5 = /^05[_\s]/.test(stageName) ||
+    const isInvited = /^05[_\s]/.test(stageName) ||
       stageName.includes('MOI PHONG VAN') ||
       stageName.includes('MOI_PHONG_VAN');
+    // Stage 08 (Đã phỏng vấn) cũng được chọn để tạo hồ sơ
+    const isInterviewed = /^08[_\s]/.test(stageName) ||
+      stageName.includes('DA PHONG VAN') ||
+      stageName.includes('DA_PHONG_VAN');
 
-    return isStage5;
+    return isInvited || isInterviewed;
   }
 
   private mapItemToPassedCandidate(item: any, list: any): PassedCandidate {
