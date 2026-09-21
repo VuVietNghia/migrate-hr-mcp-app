@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { usePolling } from '../hooks/usePolling';
+import type { PageWindow } from '../email-history/email-pagination';
 import type { IInterviewEmailTemplateRepository } from './interview-email-template-repository';
 import type { InterviewEmailTemplateDocument } from './interview-email-template';
 import { InterviewEmailTemplateLoadError } from './InterviewEmailTemplateLoadError';
@@ -38,6 +39,14 @@ export interface InterviewEmailTemplatePanelProps {
   onReadyChange(ready: boolean): void;
   /** True while this panel shows a template detail or the create form instead of its list. */
   onEditingChange?(editing: boolean): void;
+  /**
+   * The slice of this panel's search-filtered list that falls on the current page. The mailbox
+   * pages both template panels as one list, so it — not the panel — decides which rows show.
+   * Omitted, the whole list shows.
+   */
+  pageWindow?: PageWindow;
+  /** How many templates pass the search, which is what the mailbox pages over. */
+  onVisibleCountChange?(count: number): void;
 }
 
 type EditableField = 'subject' | 'body';
@@ -85,6 +94,8 @@ export function InterviewEmailTemplatePanel({
   onCountChange,
   onReadyChange,
   onEditingChange,
+  pageWindow,
+  onVisibleCountChange,
 }: InterviewEmailTemplatePanelProps) {
   const panelRef = useRef<TemplatePanelState>(createTemplatePanelState());
   const [panel, setPanel] = useState<TemplatePanelState>(panelRef.current);
@@ -211,6 +222,13 @@ export function InterviewEmailTemplatePanel({
     panel.working === 'use',
   );
   const visibleTemplates = filterInterviewEmailTemplatesByName(snapshot?.templates ?? [], query);
+  const pagedTemplates = pageWindow
+    ? visibleTemplates.slice(pageWindow.start, pageWindow.end)
+    : visibleTemplates;
+  const visibleTemplateCount = visibleTemplates.length;
+  useEffect(() => {
+    onVisibleCountChange?.(visibleTemplateCount);
+  }, [onVisibleCountChange, visibleTemplateCount]);
 
   const updateDraft = (field: keyof typeof panel.draft, value: string) => {
     updatePanel(current => updateTemplatePanelDraft(current, field, value));
@@ -299,7 +317,7 @@ export function InterviewEmailTemplatePanel({
             onRetry={() => { void refreshTemplates(); }}
           />
         ) : panel.error && <p className="interview-template-inline-error" role="alert">{panel.error}</p>}
-        {visibleTemplates.map(template => (
+        {pagedTemplates.map(template => (
           <button type="button" key={getInterviewEmailTemplateRowKey(template)} className={activeTemplateId === template.id ? 'interview-template-row is-active' : 'interview-template-row'} onClick={() => openDetail(template)}>
             <span className="interview-template-row-copy">
               <strong>{template.name || 'Mẫu email chưa đặt tên'}</strong>

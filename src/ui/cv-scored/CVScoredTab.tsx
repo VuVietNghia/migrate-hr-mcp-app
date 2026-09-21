@@ -24,7 +24,7 @@ import {
   type ScreeningListRef,
 } from './cv-list-presence';
 import { loadScreeningBoard } from './cv-board-loader';
-import { buildTrackedInviteEmailRequest } from './invite-email-request';
+import { buildTrackedInviteEmailRequest, type TrackedInviteEmailRequest } from './invite-email-request';
 import { UserSessionTrackedMail } from '../email-history/user-session-tracked-mail';
 import { createInterviewEmailTemplateRepository } from '../email-templates/interview-email-template-default';
 import type { InterviewEmailTemplateDocument } from '../email-templates/interview-email-template';
@@ -401,11 +401,27 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
   const [inviteDate, setInviteDate] = useState('');
   const [inviteSubject, setInviteSubject] = useState('');
   const [inviteEmailBody, setInviteEmailBody] = useState('');
-  const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [activeInviteTemplate, setActiveInviteTemplate] = useState<InterviewEmailTemplateDocument | null>(null);
   const [loadedInviteTemplateRepository, setLoadedInviteTemplateRepository] = useState<ActiveTemplateRepository | null>(null);
   const [inviteTemplateLoading, setInviteTemplateLoading] = useState(false);
   const [inviteTemplateError, setInviteTemplateError] = useState<string | null>(null);
+  const [inviteToast, setInviteToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const inviteToastTimerRef = React.useRef<number | null>(null);
+
+  /**
+   * The Hub embeds this app in an iframe sandboxed WITHOUT `allow-modals`, so `alert()` is dropped
+   * silently — the console only shows "Ignored call to 'alert()'". Every message in the invite-mail
+   * flow has to be drawn by the app itself or the operator sees nothing at all.
+   */
+  const showInviteToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    if (inviteToastTimerRef.current) window.clearTimeout(inviteToastTimerRef.current);
+    setInviteToast({ message, type });
+    inviteToastTimerRef.current = window.setTimeout(() => setInviteToast(null), 6000);
+  }, []);
+
+  useEffect(() => () => {
+    if (inviteToastTimerRef.current) window.clearTimeout(inviteToastTimerRef.current);
+  }, []);
   const [boardNotice, setBoardNotice] = useState<string | null>(null);
 
   const inviteValidationError = getInviteEmailValidationError({
@@ -424,63 +440,53 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
     error: inviteTemplateError,
   }, templateRepository);
 
-  const handleSendInviteEmail = async () => {
-    if (!app || !roomId || !selectedCVForInvite) return;
-    if (!inviteTemplateSendReady) return;
-    const targetEmail = inviteEmail.trim();
-
-    if (inviteValidationError) {
-      alert(inviteValidationError);
-      return;
-    }
-
-    setIsSendingInvite(true);
+  /**
+   * Runs after the modal has already closed. The server relays every room's mail through ONE
+   * sequential queue, so awaiting the send here would hold the operator on a spinner for as long as
+   * the queue is — and the Hub times the tool call out long before a busy queue drains, which used
+   * to record "Gửi lỗi" for a mail that was still on its way. `UserSessionTrackedMail` writes the
+   * "Đã gửi" / "Gửi lỗi" row itself once the send settles, exactly as before.
+   *
+   * Takes the CV and board as arguments: the modal's reset effect clears `selectedCVForInvite` and
+   * the form state as soon as it closes, so nothing here may read them.
+   */
+  const finishInviteSend = async (
+    cv: CVProfile,
+    board: CVBoardData,
+    request: TrackedInviteEmailRequest,
+  ) => {
+    if (!app) return;
     try {
-      const selectedBoard = boards.find((board) =>
-        board.cvs.some((cv) => cv._id === selectedCVForInvite._id),
-      );
-      if (!selectedBoard) {
-        throw new Error('Không tìm thấy đợt tuyển dụng của CV này.');
-      }
-
-      const { logged } = await new UserSessionTrackedMail(app).send(
-        buildTrackedInviteEmailRequest({
-          roomId,
-          cvItemId: selectedCVForInvite._id,
-          cvListId: selectedBoard.listId,
-          jdName: selectedBoard.listName,
-          toName: inviteCandidateName || 'Ứng viên',
-          toEmail: targetEmail,
-          subject: inviteSubject,
-          body: inviteEmailBody,
-        }),
-      );
-
+      const { logged } = await new UserSessionTrackedMail(app).send(request);
       // Poll đang chạy có thể mang dữ liệu trước khi ghi cờ đã gửi mail / đổi cột, rồi đè lên cập
       // nhật lạc quan bên dưới. Coi thao tác này như một lần kéo thẻ để guard chặn poll đó.
-      const inviteCvId = selectedCVForInvite._id;
+      const inviteCvId = cv._id;
       const guardedInvite = pollingGuardRef.current.beginMove(inviteCvId);
       try {
-        const updatedCustomFields = markInviteMailSent(selectedCVForInvite.customFields);
+        const updatedCustomFields = markInviteMailSent(cv.customFields);
         await restCall(app, 'POST', 'items.update', {
           body: {
             itemId: inviteCvId,
-            name: selectedCVForInvite.name,
+            name: cv.name,
             customFields: updatedCustomFields,
           },
         });
         const stageMove = await moveInvitedCVToPendingStage(
           app,
           inviteCvId,
-          getInterviewPendingStageId(selectedBoard.stagesMap),
+          getInterviewPendingStageId(board.stagesMap),
         );
         if (stageMove.status === 'failed') {
           console.error('[CVScoredTab] Đã gửi mail mời nhưng không chuyển được CV sang cột Chưa phỏng vấn:', stageMove.detail);
         }
-        setSentInviteCVIds((previous) => new Set(previous).add(inviteCvId));
         setBoards((previous) => applyInviteSentToBoards(previous, inviteCvId, updatedCustomFields, stageMove));
-        alert(buildInviteSentMessage({ targetEmail, logged, stageMove }));
-        setInviteModalOpen(false);
+        // The operator was already told the mail is on its way, so only the cases needing them to act
+        // are worth interrupting for.
+        if (!logged || stageMove.status === 'failed') {
+          showInviteToast(buildInviteSentMessage({ targetEmail: request.toEmail, logged, stageMove }), 'error');
+        } else {
+          showInviteToast(`Đã gửi email mời phỏng vấn tới ${request.toEmail}.`);
+        }
       } finally {
         if (guardedInvite) {
           pollingGuardRef.current.endMove(inviteCvId);
@@ -488,11 +494,56 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
         }
       }
     } catch (err: any) {
+      // Undo the optimistic badge so the card can be sent again.
+      setSentInviteCVIds((previous) => {
+        const next = new Set(previous);
+        next.delete(cv._id);
+        return next;
+      });
       console.error('Lỗi gửi email:', err);
-      alert('Lỗi gửi email: ' + (err.message || err));
-    } finally {
-      setIsSendingInvite(false);
+      showInviteToast(`Lỗi gửi email tới ${request.toEmail}: ` + (err.message || err), 'error');
     }
+  };
+
+  const handleSendInviteEmail = () => {
+    if (!app || !roomId || !selectedCVForInvite) return;
+    if (!inviteTemplateSendReady) return;
+    const targetEmail = inviteEmail.trim();
+
+    if (inviteValidationError) {
+      showInviteToast(inviteValidationError, 'error');
+      return;
+    }
+
+    const cv = selectedCVForInvite;
+    const selectedBoard = boards.find((board) => board.cvs.some((item) => item._id === cv._id));
+    if (!selectedBoard) {
+      showInviteToast('Lỗi gửi email: Không tìm thấy đợt tuyển dụng của CV này.', 'error');
+      return;
+    }
+
+    let request: TrackedInviteEmailRequest;
+    try {
+      request = buildTrackedInviteEmailRequest({
+        roomId,
+        cvItemId: cv._id,
+        cvListId: selectedBoard.listId,
+        jdName: selectedBoard.listName,
+        toName: inviteCandidateName || 'Ứng viên',
+        toEmail: targetEmail,
+        subject: inviteSubject,
+        body: inviteEmailBody,
+      });
+    } catch (err: any) {
+      showInviteToast('Lỗi gửi email: ' + (err.message || err), 'error');
+      return;
+    }
+
+    // Set before the send settles so the card cannot queue a second copy; rolled back on failure.
+    setSentInviteCVIds((previous) => new Set(previous).add(cv._id));
+    setInviteModalOpen(false);
+    showInviteToast(`Email đang được gửi tới ${targetEmail} — theo dõi ở tab Email.`);
+    void finishInviteSend(cv, selectedBoard, request);
   };
 
   const inviteDateRef = React.useRef<HTMLInputElement>(null);
@@ -1128,18 +1179,26 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
                 </p>
               )}
               <button className="hr-btn" onClick={() => {
-                alert('Đã tải nội dung email!');
+                showInviteToast('Đã tải nội dung email!');
               }}>Tải email về</button>
               <button 
                 className="hr-btn hr-btn-primary" 
-                disabled={isSendingInvite || !inviteTemplateSendReady || Boolean(inviteValidationError)}
-                style={{ backgroundColor: '#156FF5', color: '#fff', borderColor: '#156FF5' }} 
+                disabled={!inviteTemplateSendReady || Boolean(inviteValidationError)}
+                style={{ backgroundColor: '#156FF5', color: '#fff', borderColor: '#156FF5' }}
                 onClick={handleSendInviteEmail}
               >
-                {isSendingInvite ? 'Đang gửi...' : 'Gửi email'}
+                Gửi email
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Sits outside the modal: most of its messages arrive after the modal has closed. */}
+      {inviteToast && (
+        <div className={`cv-invite-toast is-${inviteToast.type}`} role="status" aria-live="polite">
+          <span className="cv-invite-toast-dot" />
+          <span>{inviteToast.message}</span>
         </div>
       )}
     </div>
