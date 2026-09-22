@@ -60,7 +60,7 @@
       "context": "room",
       "executionContext": "user",
       "feature": "hr.payroll.read",
-      "reason": "Read payroll records of this room through the app’s hrm.payroll.query tool (mcpapp.db.query with the installation-bot credential, pinned to the verified caller room)."
+      "reason": "Read this room’s payroll records, active email-template settings and recruitment departments through mcpapp.db.query; installation-bot payroll calls remain pinned to the verified caller room."
     },
     {
       "scope": "db:write",
@@ -68,7 +68,7 @@
       "context": "room",
       "executionContext": "user",
       "feature": "hr.payroll.manage",
-      "reason": "Create, update and soft-delete payroll records through hrm.payroll.create/update/delete (mcpapp.db.create/update/delete)."
+      "reason": "Create and update this room’s payroll records, active email-template settings and recruitment departments through mcpapp.db.create/update."
     },
     {
       "scope": "db:schema:read",
@@ -84,7 +84,7 @@
       "context": "room",
       "executionContext": "user",
       "feature": "hr.payroll.schema.manage",
-      "reason": "Register the room-scoped payroll collection once per room (mcpapp.db.registerCollection)."
+      "reason": "Register room-scoped payroll, email-template settings and recruitment-department collections on first write (mcpapp.db.registerCollection)."
     },
     {
       "scope": "sandbox:ai-chat",

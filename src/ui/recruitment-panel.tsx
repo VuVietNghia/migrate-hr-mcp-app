@@ -1,8 +1,20 @@
-import { FormEvent, useState, useEffect } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { createOrUpdateFile, readRoomFileText } from './privos-rest';
 import { PipelineService } from './pipeline-service';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
+import {
+  RecruitmentDepartmentForm,
+  RecruitmentDepartmentRenameForm,
+} from './recruitment-department-form';
+import {
+  AppDbRecruitmentDepartmentStore,
+  DEFAULT_RECRUITMENT_DEPARTMENTS,
+  createRecruitmentRoomOperation,
+  isRecruitmentDepartmentRenameable,
+  mergeRecruitmentDepartments,
+  resolveJdDepartment,
+} from './recruitment-departments';
 
 type Department = string;
 
@@ -63,6 +75,11 @@ const EMPTY_DRAFT: JobDraft = {
 
 const IT_JOBS: Job[] = [];
 
+const DEFAULT_DEPARTMENT_TABS = DEFAULT_RECRUITMENT_DEPARTMENTS.map(({ key, label }) => ({
+  id: key,
+  label,
+}));
+
 function splitLines(value: string) {
   return value.split('\n').map((item) => item.trim()).filter(Boolean);
 }
@@ -70,13 +87,11 @@ function splitLines(value: string) {
 export default function RecruitmentPanel() {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
+  const roomContextRef = useRef({ app, roomId });
+  const roomOperationRef = useRef<ReturnType<typeof createRecruitmentRoomOperation> | null>(null);
+  roomContextRef.current = { app, roomId };
 
-  const [departments, setDepartments] = useState<{ id: Department; label: string; count?: number }[]>([
-    { id: 'it', label: 'IT' },
-    { id: 'marketing', label: 'Marketing' },
-    { id: 'hr', label: 'HR' },
-    { id: 'other', label: 'Khác' },
-  ]);
+  const [departments, setDepartments] = useState<{ id: Department; label: string; count?: number }[]>(DEFAULT_DEPARTMENT_TABS);
   const [department, setDepartment] = useState<Department>('it');
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [jobsByDept, setJobsByDept] = useState<Record<string, Job[]>>({
@@ -89,12 +104,46 @@ export default function RecruitmentPanel() {
   const [draft, setDraft] = useState<JobDraft>(EMPTY_DRAFT);
   const [isSavingJD, setIsSavingJD] = useState(false);
   const [saveJDError, setSaveJDError] = useState('');
+  const [showDepartmentForm, setShowDepartmentForm] = useState(false);
+  const [departmentName, setDepartmentName] = useState('');
+  const [isSavingDepartment, setIsSavingDepartment] = useState(false);
+  const [departmentError, setDepartmentError] = useState('');
+  const [showRenameDepartmentForm, setShowRenameDepartmentForm] = useState(false);
+  const [renamedDepartmentName, setRenamedDepartmentName] = useState('');
+  const [isRenamingDepartment, setIsRenamingDepartment] = useState(false);
+  const [renameDepartmentError, setRenameDepartmentError] = useState('');
+  const [isLoadingRecruitment, setIsLoadingRecruitment] = useState(true);
 
   useEffect(() => {
+    setDepartments(DEFAULT_DEPARTMENT_TABS);
+    setDepartment('it');
+    setSelectedJob(null);
+    setJobsByDept({ it: [], marketing: [], hr: [], other: [] });
+    setShowDepartmentForm(false);
+    setDepartmentName('');
+    setDepartmentError('');
+    setIsSavingDepartment(false);
+    setShowRenameDepartmentForm(false);
+    setRenamedDepartmentName('');
+    setIsRenamingDepartment(false);
+    setRenameDepartmentError('');
+    setIsLoadingRecruitment(Boolean(app && roomId));
+
+    roomOperationRef.current = null;
     if (!app || !roomId) return;
+    const operation = createRecruitmentRoomOperation(app, roomId);
+    roomOperationRef.current = operation;
     const loadJDs = async () => {
       try {
         const service = new PipelineService(app, roomId, new MarkdownPathContextBuilder());
+        const departmentStore = new AppDbRecruitmentDepartmentStore(app, roomId);
+        const storedDepartmentsPromise = departmentStore.list().catch((error: unknown) => {
+          console.error('Failed to load recruitment departments from App Database', error);
+          if (operation.isCurrent(roomContextRef.current)) {
+            setDepartmentError('Không tải được danh sách phòng ban đã lưu; các JD trong Room vẫn được hiển thị.');
+          }
+          return [];
+        });
         const jds = await service.fetchAvailableJDs();
         
         const nextJobsByDept: Record<string, Job[]> = {
@@ -103,12 +152,7 @@ export default function RecruitmentPanel() {
           hr: [],
           other: []
         };
-        const nextDepts = [
-          { id: 'it', label: 'IT' },
-          { id: 'marketing', label: 'Marketing' },
-          { id: 'hr', label: 'HR' },
-          { id: 'other', label: 'Khác' },
-        ];
+        const jdDepartments: Array<{ key: string; label: string }> = [];
 
         for (const jd of jds) {
           if (!jd.name.startsWith('JD_') || jd.name.startsWith('JD_AI_')) continue;
@@ -129,27 +173,24 @@ export default function RecruitmentPanel() {
           if (!title) continue;
 
           // Parse table format
-          const deptTableMatch = content.match(/\|\s*\*\*Phòng ban\*\*\s*\|\s*(.*?)\s*\|/);
           const locationTableMatch = content.match(/\|\s*\*\*Địa điểm làm việc\*\*\s*\|\s*(.*?)\s*\|/);
           const typeTableMatch = content.match(/\|\s*\*\*Thời gian làm việc\*\*\s*\|\s*(.*?)\s*\|/);
           const salaryTableMatch = content.match(/\|\s*\*\*Mức lương\*\*\s*\|\s*(.*?)\s*\|/);
 
           // Parse old format
-          const deptOldMatch = content.match(/- Ph\u00f2ng ban: (.*)/);
           const typeOldMatch = content.match(/- H\u00ecnh th\u1ee9c: (.*)/);
           const salaryOldMatch = content.match(/- Thu nh\u1eadp: (.*)/);
           const summaryOldMatch = content.match(/- M\u00f4 t\u1ea3 ng\u1eafn: (.*)/);
           const summaryHtmlMatch = content.match(/<!-- SUMMARY:\s*(.*?)\s*-->/);
           
-          const deptLabel = deptTableMatch ? deptTableMatch[1].trim() : (deptOldMatch ? deptOldMatch[1].trim() : 'Khác');
+          const { key: deptId, label: deptLabel } = resolveJdDepartment(content);
           const type = typeTableMatch ? typeTableMatch[1].trim() : (typeOldMatch ? typeOldMatch[1].trim() : 'Thỏa thuận');
           const salary = salaryTableMatch ? salaryTableMatch[1].trim() : (salaryOldMatch ? salaryOldMatch[1].trim() : 'Thỏa thuận');
           const location = locationTableMatch ? locationTableMatch[1].trim() : 'Không xác định';
           const summary = summaryHtmlMatch ? summaryHtmlMatch[1].trim() : (summaryOldMatch ? summaryOldMatch[1].trim() : '');
 
-          const deptId = deptLabel.toLowerCase().replace(/\s+/g, '_');
-          if (!nextDepts.find(d => d.id === deptId)) {
-            nextDepts.push({ id: deptId, label: deptLabel });
+          if (!jdDepartments.find((item) => item.key === deptId)) {
+            jdDepartments.push({ key: deptId, label: deptLabel });
           }
 
           if (!nextJobsByDept[deptId]) nextJobsByDept[deptId] = [];
@@ -188,18 +229,35 @@ export default function RecruitmentPanel() {
           }
         }
 
-        setDepartments(nextDepts);
+        const storedDepartments = await storedDepartmentsPromise;
+        const mergedDepartments = mergeRecruitmentDepartments(storedDepartments, jdDepartments);
+        for (const item of mergedDepartments) {
+          if (!nextJobsByDept[item.key]) nextJobsByDept[item.key] = [];
+        }
+        if (!operation.isCurrent(roomContextRef.current)) return;
+        setDepartments(mergedDepartments.map(({ key, label }) => ({ id: key, label })));
         setJobsByDept(nextJobsByDept);
       } catch (e: any) {
         console.error("Failed to load JDs from room files", e);
+      } finally {
+        if (operation.isCurrent(roomContextRef.current)) {
+          setIsLoadingRecruitment(false);
+        }
       }
     };
     loadJDs();
+    return () => {
+      operation.cancel();
+      if (roomOperationRef.current === operation) roomOperationRef.current = null;
+    };
   }, [app, roomId]);
 
   const selectDepartment = (nextDepartment: Department) => {
     setDepartment(nextDepartment);
     setSelectedJob(null);
+    setShowRenameDepartmentForm(false);
+    setRenamedDepartmentName('');
+    setRenameDepartmentError('');
   };
 
   const submitJob = async (event: FormEvent<HTMLFormElement>) => {
@@ -229,6 +287,8 @@ export default function RecruitmentPanel() {
 
     const deptLabel = departments.find(d => d.id === department)?.label || department;
     const content = `# TUYỂN DỤNG: ${newJob.title.toUpperCase()}
+
+<!-- DEPARTMENT_ID: ${department} -->
 
 ***
 
@@ -311,14 +371,75 @@ _Đăng ngày: ${new Date().toISOString().slice(0, 10)}_
     }
   };
 
-  const addDepartment = () => {
-    const name = window.prompt("Nhập tên phòng ban mới:");
-    if (name && name.trim()) {
-      const id = name.trim().toLowerCase().replace(/\s+/g, '_');
-      if (!departments.find(d => d.id === id)) {
-        setDepartments([...departments, { id, label: name.trim() }]);
-        setJobsByDept(prev => ({ ...prev, [id]: [] }));
-        setDepartment(id);
+  const submitDepartment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSavingDepartment || !departmentName.trim()) return;
+    if (!app || !roomId) {
+      setDepartmentError('Không thể lưu phòng ban vì chưa kết nối được với Room.');
+      return;
+    }
+    const operation = roomOperationRef.current;
+    if (!operation?.isCurrent(roomContextRef.current)) return;
+    setIsSavingDepartment(true);
+    setDepartmentError('');
+    try {
+      const store = new AppDbRecruitmentDepartmentStore(app, roomId);
+      const saved = await store.create(departmentName, departments.length);
+      if (!operation.isCurrent(roomContextRef.current)) return;
+      setDepartments((current) => current.some((item) => item.id === saved.key)
+        ? current
+        : [...current, { id: saved.key, label: saved.label }]);
+      setJobsByDept((current) => ({ ...current, [saved.key]: current[saved.key] || [] }));
+      setDepartment(saved.key);
+      setSelectedJob(null);
+      setDepartmentName('');
+      setShowDepartmentForm(false);
+    } catch (error: unknown) {
+      console.error('Failed to save recruitment department to App Database', error);
+      if (!operation.isCurrent(roomContextRef.current)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setDepartmentError(`Không thể lưu phòng ban vào Room: ${message}`);
+    } finally {
+      if (operation.isCurrent(roomContextRef.current)) {
+        setIsSavingDepartment(false);
+      }
+    }
+  };
+
+  const submitDepartmentRename = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isRenamingDepartment || !renamedDepartmentName.trim()) return;
+    if (!app || !roomId) {
+      setRenameDepartmentError('Không thể đổi tên phòng ban vì chưa kết nối được với Room.');
+      return;
+    }
+    if (!isRecruitmentDepartmentRenameable(department)) {
+      setRenameDepartmentError('Phòng ban mặc định không thể đổi tên.');
+      return;
+    }
+    const operation = roomOperationRef.current;
+    if (!operation?.isCurrent(roomContextRef.current)) return;
+
+    setIsRenamingDepartment(true);
+    setRenameDepartmentError('');
+    try {
+      const order = Math.max(0, departments.findIndex((item) => item.id === department));
+      const store = new AppDbRecruitmentDepartmentStore(app, roomId);
+      const saved = await store.rename(department, renamedDepartmentName, order);
+      if (!operation.isCurrent(roomContextRef.current)) return;
+      setDepartments((current) => current.map((item) => (
+        item.id === saved.key ? { ...item, label: saved.label } : item
+      )));
+      setRenamedDepartmentName('');
+      setShowRenameDepartmentForm(false);
+    } catch (error: unknown) {
+      console.error('Failed to rename recruitment department in App Database', error);
+      if (!operation.isCurrent(roomContextRef.current)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setRenameDepartmentError(`Không thể đổi tên phòng ban: ${message}`);
+    } finally {
+      if (operation.isCurrent(roomContextRef.current)) {
+        setIsRenamingDepartment(false);
       }
     }
   };
@@ -352,20 +473,99 @@ _Đăng ngày: ${new Date().toISOString().slice(0, 10)}_
               </button>
             );
           })}
-          <button type="button" className="recruitment-category" onClick={addDepartment} style={{ borderStyle: 'dashed' }}>
+          <button
+            type="button"
+            className="recruitment-category"
+            disabled={
+              isLoadingRecruitment
+              || isSavingDepartment
+              || !app
+              || !roomId
+              || !roomOperationRef.current?.isCurrent(roomContextRef.current)
+            }
+            onClick={() => {
+              setDepartmentError('');
+              setShowRenameDepartmentForm(false);
+              setRenamedDepartmentName('');
+              setRenameDepartmentError('');
+              setShowDepartmentForm((current) => !current);
+            }}
+            style={{ borderStyle: 'dashed' }}
+            aria-expanded={showDepartmentForm}
+          >
             + Thêm phòng ban
           </button>
         </div>
+
+        {showDepartmentForm && (
+          <RecruitmentDepartmentForm
+            departmentName={departmentName}
+            isLoading={isLoadingRecruitment}
+            isSaving={isSavingDepartment}
+            onNameChange={setDepartmentName}
+            onSubmit={submitDepartment}
+            onCancel={() => {
+              setDepartmentName('');
+              setDepartmentError('');
+              setShowDepartmentForm(false);
+            }}
+          />
+        )}
+        {departmentError && <p className="recruitment-department-error" role="alert">{departmentError}</p>}
 
             <div className="recruitment-heading">
               <div>
                 <span>{jobs.length > 0 ? 'ĐANG TUYỂN' : 'TỰ TẠO JD'}</span>
                 <h2>Phòng Ban: {departmentLabel}</h2>
               </div>
-              <button type="button" className="add-job-button" onClick={() => setShowForm(true)}>
-                <span aria-hidden="true">+</span> Thêm JD
-              </button>
+              <div className="recruitment-heading-actions">
+                {isRecruitmentDepartmentRenameable(department) && (
+                  <button
+                    type="button"
+                    className="rename-department-button"
+                    disabled={isLoadingRecruitment || isRenamingDepartment || !app || !roomId}
+                    aria-expanded={showRenameDepartmentForm}
+                    onClick={() => {
+                      setShowDepartmentForm(false);
+                      setDepartmentError('');
+                      setRenameDepartmentError('');
+                      setRenamedDepartmentName('');
+                      setShowRenameDepartmentForm((current) => !current);
+                    }}
+                  >
+                    Đổi tên
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="add-job-button"
+                  onClick={() => {
+                    setShowRenameDepartmentForm(false);
+                    setRenamedDepartmentName('');
+                    setRenameDepartmentError('');
+                    setShowForm(true);
+                  }}
+                >
+                  <span aria-hidden="true">+</span> Thêm JD
+                </button>
+              </div>
             </div>
+
+            {showRenameDepartmentForm && (
+              <RecruitmentDepartmentRenameForm
+                currentDepartmentName={departmentLabel}
+                departmentName={renamedDepartmentName}
+                errorMessage={renameDepartmentError}
+                isSaving={isRenamingDepartment}
+                onNameChange={setRenamedDepartmentName}
+                onSubmit={submitDepartmentRename}
+                onCancel={() => {
+                  setRenamedDepartmentName('');
+                  setRenameDepartmentError('');
+                  setShowRenameDepartmentForm(false);
+                }}
+              />
+            )}
 
             {showForm && (
               <form className="job-form" onSubmit={submitJob}>

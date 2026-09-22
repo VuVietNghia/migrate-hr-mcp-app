@@ -26,13 +26,11 @@ const INBOX_COLUMN: CVKanbanColumn = { status: INBOX_STATUS, label: 'Đầu vào
 
 export function getCVColumnsForStages(
   stagesMap: Record<string, string>,
-  hasInboxCards = false,
+  _hasInboxCards = false,
 ): CVKanbanColumn[] {
   const stageNames = Object.values(stagesMap);
   const baseColumns = stageNames.includes('09_CV_Cu') ? NEW_LIST_COLUMNS : LEGACY_LIST_COLUMNS;
-  return hasInboxCards || stageNames.includes(INBOX_STATUS)
-    ? [INBOX_COLUMN, ...baseColumns]
-    : baseColumns;
+  return baseColumns;
 }
 
 export function getInterviewPendingStageId(stagesMap: Record<string, string>): string | undefined {
@@ -40,7 +38,8 @@ export function getInterviewPendingStageId(stagesMap: Record<string, string>): s
 }
 
 export function getCVColumnLabel(stagesMap: Record<string, string>, status: string): string | undefined {
-  return getCVColumnsForStages(stagesMap, status === INBOX_STATUS)
+  if (status === INBOX_STATUS) return INBOX_COLUMN.label;
+  return getCVColumnsForStages(stagesMap)
     .find((column) => column.status === status)?.label;
 }
 
