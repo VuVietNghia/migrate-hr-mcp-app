@@ -130,23 +130,28 @@ export class PrivOSLifecycleService implements ILifecycleService {
           }
         });
 
-        const parsed = JSON.parse(res?.content?.[0]?.text || '{}');
+        // `parseToolResult` turns a tool-level `isError` into a rejection instead of a JSON.parse
+        // failure that used to be swallowed into a fake local profile.
+        const parsed: any = parseToolResult(res);
+        const item = parsed?.item ?? parsed;
+        const createdId = item?._id || item?.id;
+        if (typeof createdId !== 'string' || !createdId) {
+          throw new Error('Hub không trả về id của hồ sơ vừa tạo.');
+        }
         return {
           ...data,
-          _id: parsed._id || parsed.id || this.generateLocalId(),
+          _id: createdId,
           status: PrivOSLifecycleService.DEFAULT_STAGE
         };
       }
     } catch (err) {
       console.error('[PrivOSLifecycleService] Connection error when creating profile:', err);
+      // No fallback profile: the caller must show the failure, otherwise HR believes the profile
+      // was saved and the card silently disappears on the next refresh.
+      throw err;
     }
 
-    // Fallback if failed
-    return {
-      ...data,
-      _id: this.generateLocalId(),
-      status: PrivOSLifecycleService.DEFAULT_STAGE
-    };
+    throw new Error('Không tìm thấy hoặc không tạo được danh sách "Hồ sơ nhân sự" trong room.');
   }
 
   async updateProfileStatus(roomId: string, profileId: string, newStatus: string): Promise<void> {
@@ -255,11 +260,6 @@ export class PrivOSLifecycleService implements ILifecycleService {
 
   // --- Private Helper Methods ---
 
-  private generateLocalId(): string {
-    // Hậu tố ngẫu nhiên là bắt buộc: hai hồ sơ tạo trong cùng một mili-giây (bấm hai lần nhanh,
-    // hoặc tạo liên tiếp khi Hub đang lỗi) sẽ nhận cùng `Date.now()` và trùng `_id`.
-    return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }
 
   private async ensureValidList(roomId: string): Promise<any> {
     const existing = await this.findExistingList(roomId);

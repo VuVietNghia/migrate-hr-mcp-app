@@ -8,6 +8,7 @@ import { getInviteMailButtonState } from './invite-mail-status';
 import { markInviteMailSent } from './invite-mail-persistence';
 import { canShowInviteMailButton, getCVColumnLabel, getCVColumnsForStages, getInterviewPendingStageId, type CVKanbanColumn } from './kanban-stages';
 import { restCall } from '../privos-rest';
+import { stripCvFileSuffix } from '../pipeline-candidate-name';
 import { usePolling } from '../hooks/usePolling';
 import { CVBoardPollingGuard } from './polling-sync';
 import { moveCVToStage } from './cv-stage-move';
@@ -871,7 +872,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
               board={board} 
               onMove={handleMove} 
               onInvite={(cv, posName) => {
-                let cleanName = cv.name.replace(/\.md$/i, '');
+                let cleanName = stripCvFileSuffix(cv.name.replace(/\.md$/i, ''));
                 const cvIndex = cleanName.indexOf('_CV_');
                 if (cvIndex !== -1) {
                   cleanName = cleanName.substring(cvIndex + 4);
