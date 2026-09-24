@@ -7,7 +7,7 @@ import sangLocCvRaw from './data/sang_loc_cv.md?raw';
 import cvEvaluatorSkillRaw from './data/cv-evaluator-skill.md?raw';
 import jdTemplateRaw from './data/jd_template.md?raw';
 import jdGeneratorSkillRaw from './data/jd-generator-skill.md?raw';
-import { buildCandidateMarkdownFileName, extractCandidateNameFromMarkdown, formatKanbanItemTitle } from './pipeline-candidate-name';
+import { buildCandidateMarkdownFileName, extractCandidateNameFromMarkdown, formatKanbanItemTitle, withCvFileSuffix } from './pipeline-candidate-name';
 import { moveCVToStage } from './cv-scored/cv-stage-move';
 import { readParsedCvText, stripCvContentTags } from './parsed-cv-text';
 import {
@@ -214,6 +214,22 @@ async function syncSkillTemplates(app: McpApp, roomId: string, forceReset: boole
   }
 }
 
+/** `file-management.files.channel` caps `count` at 100 (privos-dev-docs file-management-api.md). */
+export const ROOM_FILES_PAGE_SIZE = 100;
+/** 50 × 100 = 5000 files: a hard stop so a Hub that never returns a short page cannot loop forever. */
+export const ROOM_FILES_MAX_PAGES = 50;
+/** Full re-reads allowed when `total` changes mid-read (a file uploaded or deleted meanwhile). */
+export const ROOM_FILES_MAX_ATTEMPTS = 3;
+
+/** One entry of `file-management.files.channel` — only the fields this service maps. */
+type RoomFileRow = {
+  _id?: string;
+  name?: string;
+  size?: number;
+  file_size?: number;
+  downloadUrl?: string;
+};
+
 export class PipelineService {
   private app: McpApp;
   private roomId: string;
@@ -230,22 +246,84 @@ export class PipelineService {
     return ensureTemplatesExistGlobal(this.app, this.roomId, forceReset);
   }
 
+  /**
+   * Every file of the room, read page by page. A partial list is never returned: the CV Pipeline
+   * treats a selected CV missing from this list as deleted, so a truncated read used to unselect
+   * real CVs and skip them as `cv-deleted`. Any read that cannot be proven complete throws instead,
+   * and the callers keep their current state.
+   */
   async fetchAvailableFiles(): Promise<CVFile[]> {
-    const body = await restCall<any>(this.app, 'GET', `file-management.files.channel/${this.roomId}`, {
-      query: { count: 50 },
-      timeoutMs: 15000
-    });
-    const list = body?.files ?? body?.data ?? (Array.isArray(body) ? body : []);
+    for (let attempt = 0; attempt < ROOM_FILES_MAX_ATTEMPTS; attempt += 1) {
+      const rows = await this.readAllRoomFiles();
+      if (rows === null) continue; // `total` changed mid-read: an offset shift may have skipped a file.
 
-    // Hide guideline files completely from the UI
-    return list
-      .filter((f: any) => !(f.name || '').includes('/skills/'))
-      .map((f: any) => ({
-        _id: f._id,
-        name: f.name,
-        size: f.size ?? f.file_size,
-        downloadUrl: f.downloadUrl,
-      }));
+      // Hide guideline files completely from the UI
+      return rows
+        .filter((f) => !(f.name || '').includes('/skills/'))
+        .map((f) => ({
+          _id: f._id as string,
+          name: f.name as string,
+          size: f.size ?? f.file_size,
+          downloadUrl: f.downloadUrl,
+        }));
+    }
+    throw new Error('Danh sách file trong room thay đổi liên tục khi đang đọc. Vui lòng thử lại sau.');
+  }
+
+  /**
+   * One complete pass over `file-management.files.channel`, or `null` when `total` changed between
+   * pages. With a `total`, the read ends only once `offset + page length` reaches it — a short page
+   * alone is not trusted, since a Hub may cap `count` below 100 — and the next offset advances by
+   * the rows actually received. Without a `total`, a short page ends the read.
+   */
+  private async readAllRoomFiles(): Promise<RoomFileRow[] | null> {
+    const collected: RoomFileRow[] = [];
+    const seenIds = new Set<string>();
+    let firstTotal: number | undefined;
+    let offset = 0;
+
+    for (let page = 0; page < ROOM_FILES_MAX_PAGES; page += 1) {
+      const body = await restCall<any>(this.app, 'GET', `file-management.files.channel/${this.roomId}`, {
+        query: { count: ROOM_FILES_PAGE_SIZE, offset },
+        timeoutMs: 15000,
+      });
+
+      const pageFiles: unknown = body?.files ?? body?.data ?? (Array.isArray(body) ? body : undefined);
+      if (!Array.isArray(pageFiles)) {
+        throw new Error('Không đọc được danh sách file trong room: phản hồi không có danh sách file.');
+      }
+
+      const total = typeof body?.total === 'number' ? body.total : undefined;
+      if (page === 0) firstTotal = total;
+      else if (total !== firstTotal) return null;
+
+      let added = 0;
+      for (const file of pageFiles as RoomFileRow[]) {
+        const id = typeof file?._id === 'string' ? file._id : '';
+        if (id && seenIds.has(id)) continue;
+        if (id) seenIds.add(id);
+        collected.push(file);
+        added += 1;
+      }
+      // A non-empty page with nothing new means the Hub served the same rows again (offset ignored).
+      if (pageFiles.length > 0 && added === 0) {
+        throw new Error('Hub bỏ qua offset khi phân trang danh sách file. Dừng để không lặp vô hạn.');
+      }
+
+      if (total !== undefined) {
+        if (offset + pageFiles.length >= total) return collected;
+        if (pageFiles.length === 0) {
+          throw new Error('Hub trả trang rỗng trước khi đọc đủ danh sách file. Dừng để không trả về danh sách CV thiếu.');
+        }
+      } else if (pageFiles.length < ROOM_FILES_PAGE_SIZE) {
+        return collected;
+      }
+      offset += pageFiles.length;
+    }
+
+    throw new Error(
+      `Room có hơn ${ROOM_FILES_MAX_PAGES * ROOM_FILES_PAGE_SIZE} file. Dừng để không trả về danh sách CV thiếu.`,
+    );
   }
 
   async fetchAvailableJDs(onLog?: (msg: string) => void): Promise<CVFile[]> {
@@ -405,9 +483,14 @@ export class PipelineService {
   async uploadCV(file: File): Promise<CVFile> {
     const dataUri = await this.readAsDataUri(file);
 
-    // Tiền kiểm tra danh sách file hiện có để tránh lỗi DUPLICATE_FILE
-    const existingFiles = await this.fetchAvailableFiles();
-    const existingNames = new Set(existingFiles.map(f => f.name));
+    // Tiền kiểm tra danh sách file hiện có để tránh lỗi DUPLICATE_FILE. Việc đọc danh sách chỉ để
+    // đặt tên không trùng, nên nếu đọc lỗi thì vẫn upload với tên gốc; Hub vẫn chặn file trùng.
+    let existingNames = new Set<string>();
+    try {
+      existingNames = new Set((await this.fetchAvailableFiles()).map(f => f.name));
+    } catch (err) {
+      console.warn('[CV Pipeline] Không đọc được danh sách file để kiểm tra trùng tên, upload với tên gốc.', err);
+    }
 
     let finalName = file.name;
     let counter = 1;
@@ -617,6 +700,10 @@ KHI HOÀN TẤT, BẠN BẮT BUỘC PHẢI TRẢ VỀ:
         }
       }
 
+      // Hai ứng viên trùng họ tên chấm cùng ngày không được ghi đè file của nhau; chấm lại cùng một
+      // CV vẫn ra đúng tên cũ nên ghi đè đúng file của CV đó.
+      if (newMdName) newMdName = withCvFileSuffix(newMdName, cv._id);
+
       if (onLog) onLog(`[Giữ nguyên File Gốc] AI đã tạo file MD: ${newMdName}`);
 
       // Self-healing: Đảm bảo file Markdown chắc chắn được lưu vào Room Files để người dùng tương tác được
@@ -629,7 +716,10 @@ KHI HOÀN TẤT, BẠN BẮT BUỘC PHẢI TRẢ VỀ:
           await createOrUpdateFile(this.app, targetRoomFilePath, extractedMarkdown);
           if (onLog) onLog(`[Room Files] Đã xác nhận lưu file kết quả vào: ${targetRoomFilePath}`);
         } catch (fileSaveErr: any) {
-          console.warn('[Room Files] Lỗi lưu fallback file MD:', fileSaveErr);
+          // Không lưu được file đánh giá thì CV không được coi là hoàn tất: thẻ Kanban và email mời
+          // đều đọc file này, còn bản trong bộ nhớ sẽ mất khi tải lại trang. Lỗi này rơi vào catch
+          // ngoài cùng của processCV, nơi CV được chuyển sang status 'error'.
+          throw new Error(`Không lưu được file đánh giá ${newMdName}: ${fileSaveErr?.message || fileSaveErr}`);
         }
       }
 
@@ -795,12 +885,15 @@ ${content}
     });
 
     const sessionId = sent.sessionId;
-    const aiMessageId = sent.aiMessage?._id;
-
-    if (aiMessageId) {
-      if (onLog) onLog(`>> Đã khởi tạo Session: ${sessionId}, Yêu cầu AI phản hồi...`);
-      await restCall(this.app, 'POST', 'ai-messages.startGeneration', { body: { messageId: aiMessageId } });
+    const aiMessageId: unknown = sent.aiMessage?._id;
+    // Chấm CV, soạn thảo và trang công ty dùng chung một phiên chat của room, nên chỉ id này phân
+    // biệt được câu trả lời của yêu cầu vừa gửi. Không có id thì không đoán theo "tin AI mới nhất".
+    if (typeof aiMessageId !== 'string' || !aiMessageId) {
+      throw new Error('Hub không trả về id tin nhắn AI (aiMessage._id), không xác định được câu trả lời của yêu cầu này.');
     }
+
+    if (onLog) onLog(`>> Đã khởi tạo Session: ${sessionId}, Yêu cầu AI phản hồi...`);
+    await restCall(this.app, 'POST', 'ai-messages.startGeneration', { body: { messageId: aiMessageId } });
 
     // 300 x 2s = 600s = 10 phút, đủ để AI đọc file rồi xuất MD.
     let consecutiveFailures = 0;
@@ -829,7 +922,7 @@ ${content}
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
       const list = Array.isArray(res?.messages) ? res.messages : [];
-      const aiMsg = [...list].reverse().find((m: any) => m.type === 'ai');
+      const aiMsg = list.find((m: any) => m?._id === aiMessageId);
 
       if (aiMsg) {
         if (onLog) onLog(`>> Đang chờ (status = ${aiMsg.status})...`);

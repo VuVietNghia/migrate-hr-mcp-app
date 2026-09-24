@@ -126,8 +126,15 @@ function LifecycleContent({ active }: { active: boolean }) {
     if (!roomId) return;
     setStatusMsg({ text: `Đang khởi tạo hồ sơ cho "${data.name}"...`, type: 'info' });
     
-    // Create via service
-    const newProfile = await service.createProfile(roomId, data);
+    // Create via service. A failure is re-thrown so CreateDetailedProfileForm shows it; the
+    // "đang khởi tạo" banner is cleared so it does not stay up after the error.
+    let newProfile: EmployeeProfile;
+    try {
+      newProfile = await service.createProfile(roomId, data);
+    } catch (err) {
+      setStatusMsg(null);
+      throw err;
+    }
     
     // Optimistic UI update
     setProfiles(prev => [...prev, newProfile]);

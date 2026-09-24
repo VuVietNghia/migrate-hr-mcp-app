@@ -652,7 +652,14 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
     if (!serviceRef.current) return;
     setLoading(true);
     try { setFiles(await serviceRef.current.fetchAvailableFiles()); }
-    catch (err) { console.error(err); }
+    catch (err) {
+      console.error(err);
+      // The list is kept as it was: an incomplete read must never replace it with a partial one.
+      // `addLog` only reaches the console, so the reason is also shown on screen.
+      const reason = err instanceof Error ? err.message : String(err);
+      addLog(`[LỖI] Không tải được danh sách CV: ${reason}`);
+      showToast(`Không tải được danh sách CV: ${reason}`, 'error');
+    }
     finally { setLoading(false); }
   };
 
@@ -774,6 +781,10 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
           return s;
         });
       }
+    } catch (err) {
+      console.error(err);
+      // The uploads above already finished; only the list refresh failed, so the next poll catches up.
+      showToast(`Đã tải lên nhưng không làm mới được danh sách CV: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
       setLoading(false);
       e.target.value = '';

@@ -468,27 +468,50 @@ describe('PrivOSLifecycleService gan file dinh kem dung truong', () => {
   });
 });
 
-describe('PrivOSLifecycleService id local khi tao ho so that bai', () => {
-  it('sinh id khac nhau cho hai ho so tao trong cung mot mili-giay', async () => {
-    // Dong bang dong ho de hai lan goi chac chan roi vao cung mot mili-giay. Neu de thoi gian
-    // that chay, test se lúc pass lúc fail tuy toc do may — dung cai can tranh o day.
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-09-16T00:00:00.000Z'));
-    try {
-      const { app } = createAppStub({
-        'mcpapp.lists.getAll': () => { throw new Error('hub khong phan hoi'); },
-      });
-      const service = new PrivOSLifecycleService(app as never);
+describe('PrivOSLifecycleService khong tra ho so gia khi tao that bai', () => {
+  const LIST_OK = { ...HR_LIST, stages: STAGES };
 
-      const dau = await service.createProfile('room-1', { name: 'NV A' } as never);
-      const sau = await service.createProfile('room-1', { name: 'NV B' } as never);
+  it('nem loi khi Hub khong phan hoi, khong tra id local', async () => {
+    const { app } = createAppStub({
+      'mcpapp.lists.getAll': () => { throw new Error('hub khong phan hoi'); },
+    });
+    const service = new PrivOSLifecycleService(app as never);
 
-      expect(dau._id).not.toBe(sau._id);
-      expect(dau._id.startsWith('local-')).toBe(true);
-      expect(sau._id.startsWith('local-')).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(service.createProfile('room-1', { name: 'NV A' } as never)).rejects.toBeInstanceOf(Error);
+  });
+
+  it('nem loi khi createItem tra isError', async () => {
+    const { app } = createAppStub({
+      'mcpapp.lists.getAll': () => [LIST_OK],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.createItem': () => rawResult({ isError: true, content: [{ type: 'text', text: 'createItem bi tu choi' }] }),
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await expect(service.createProfile('room-1', { name: 'NV A' } as never)).rejects.toThrow('createItem bi tu choi');
+  });
+
+  it('nem loi khi createItem khong tra id', async () => {
+    const { app } = createAppStub({
+      'mcpapp.lists.getAll': () => [LIST_OK],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.createItem': () => ({}),
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    await expect(service.createProfile('room-1', { name: 'NV A' } as never)).rejects.toThrow(/id/);
+  });
+
+  it('doc id tu item long nhau', async () => {
+    const { app } = createAppStub({
+      'mcpapp.lists.getAll': () => [LIST_OK],
+      'mcpapp.lists.searchItems': () => [CONFIG_ITEM],
+      'mcpapp.lists.createItem': () => ({ item: { _id: 'emp-long-nhau' } }),
+    });
+    const service = new PrivOSLifecycleService(app as never);
+
+    const created = await service.createProfile('room-1', { name: 'NV A' } as never);
+    expect(created._id).toBe('emp-long-nhau');
   });
 });
 

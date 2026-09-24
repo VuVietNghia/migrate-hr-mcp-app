@@ -55,3 +55,31 @@ export function formatKanbanItemTitle(rawTitle: string): string {
   const nameStart = marker + '_CV_'.length;
   return nameWithoutExt.slice(0, nameStart) + toCandidateNameCase(nameWithoutExt.slice(nameStart));
 }
+
+/** `-` + six lowercase hex characters, right before the extension. */
+const CV_FILE_SUFFIX = /-[0-9a-f]{6}$/i;
+
+/**
+ * Stable per-CV suffix: the last 6 hex characters of the raw CV's Room file id. Two candidates with
+ * the same full name scored on the same day get different evaluation files; re-scoring the same CV
+ * gets the same name, so it overwrites its own file as before. `''` when the id has no 6 hex chars.
+ */
+export function cvFileSuffix(cvFileId: string): string {
+  const hex = (cvFileId || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+  return hex.length >= 6 ? `-${hex.slice(-6)}` : '';
+}
+
+/** Inserts `cvFileSuffix(cvFileId)` before a trailing `.md`. Idempotent. */
+export function withCvFileSuffix(fileName: string, cvFileId: string): string {
+  const suffix = cvFileSuffix(cvFileId);
+  if (!suffix) return fileName;
+  const extStart = /\.md$/i.test(fileName) ? fileName.length - 3 : fileName.length;
+  const base = fileName.slice(0, extStart);
+  if (base.endsWith(suffix)) return fileName;
+  return `${base}${suffix}${fileName.slice(extStart)}`;
+}
+
+/** Drops the per-CV suffix from a name that no longer carries its extension. */
+export function stripCvFileSuffix(name: string): string {
+  return name.replace(CV_FILE_SUFFIX, '');
+}

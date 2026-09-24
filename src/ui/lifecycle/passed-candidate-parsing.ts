@@ -1,3 +1,5 @@
+import { stripCvFileSuffix } from '../pipeline-candidate-name';
+
 const POSITION_RULES: ReadonlyArray<{ value: string; keys: ReadonlyArray<string> }> = [
   { value: 'Developer', keys: ['dev', 'developer', 'programmer', 'lap trinh'] },
   { value: 'Tester', keys: ['test', 'tester', 'qa', 'qc', 'kiem thu'] },
@@ -40,8 +42,7 @@ export function positionFromScreeningListName(listName: string): string | undefi
 
 /** Tiêu đề thẻ có dạng `2026-09-11_CV_Vu_Viet_Nghia.md`; họ tên là toàn bộ phần sau `CV_`. */
 export function parseCandidateName(rawTitle: string): string {
-  const name = rawTitle
-    .replace(/\.(md|pdf|docx|doc)$/i, '')
+  const name = stripCvFileSuffix(rawTitle.replace(/\.(md|pdf|docx|doc)$/i, ''))
     .replace(/^\d{4}[-_]\d{2}[-_]\d{2}[-_]?/, '')
     .replace(/^CV[-_]?/i, '')
     .replace(/([a-z])([A-Z])/g, '$1 $2')

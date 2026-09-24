@@ -60,3 +60,10 @@ describe('parseCandidateName', () => {
     expect(parseCandidateName('')).toBe('Không có tên');
   });
 });
+
+describe('parseCandidateName bo hau to hex', () => {
+  it('khong dua hau to vao ho ten', () => {
+    expect(parseCandidateName('2026-09-23_CV_Nguyen_Van_A-3f9c1a.md')).toBe('Nguyen Van A');
+    expect(parseCandidateName('2026-09-23_CV_Nguyen_Van_A-3f9c1a')).toBe('Nguyen Van A');
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCandidateMarkdownFileName, formatKanbanItemTitle } from '../src/ui/pipeline-candidate-name';
+import { buildCandidateMarkdownFileName, cvFileSuffix, formatKanbanItemTitle, stripCvFileSuffix, withCvFileSuffix } from '../src/ui/pipeline-candidate-name';
 import { parseCandidateName } from '../src/ui/lifecycle/passed-candidate-parsing';
 
 describe('buildCandidateMarkdownFileName — the saved .md file', () => {
@@ -61,5 +61,45 @@ describe('readers of the card title still get the candidate name', () => {
 
     expect(parseCandidateName(newTitle)).toBe('Nguyen Viet Hung');
     expect(parseCandidateName(oldTitle).toLowerCase()).toBe(parseCandidateName(newTitle).toLowerCase());
+  });
+});
+
+describe('hau to tu id CV goc', () => {
+  it('lay 6 ky tu hex cuoi, viet thuong', () => {
+    expect(cvFileSuffix('66F1A2B3C4D5E6F7A8B9C0D1')).toBe('-b9c0d1');
+  });
+
+  it('khong co hau to khi id khong du 6 ky tu hex', () => {
+    expect(cvFileSuffix('abc')).toBe('');
+    expect(cvFileSuffix('')).toBe('');
+  });
+
+  it('chen hau to truoc .md', () => {
+    expect(withCvFileSuffix('2026-09-23_CV_Nguyen_Van_A.md', '66f1a2b3c4d5e6f7a83f9c1a')).toBe(
+      '2026-09-23_CV_Nguyen_Van_A-3f9c1a.md',
+    );
+  });
+
+  it('cung CV cho cung ten, hai CV khac nhau cho ten khac nhau', () => {
+    const name = '2026-09-23_CV_Nguyen_Van_A.md';
+    const a1 = withCvFileSuffix(name, '66f1a2b3c4d5e6f7a8000001');
+    const a2 = withCvFileSuffix(name, '66f1a2b3c4d5e6f7a8000001');
+    const b = withCvFileSuffix(name, '66f1a2b3c4d5e6f7a8000002');
+    expect(a1).toBe(a2);
+    expect(a1).not.toBe(b);
+  });
+
+  it('goi lai tren ten da co hau to thi giu nguyen', () => {
+    const once = withCvFileSuffix('2026-09-23_CV_Nguyen_Van_A.md', '66f1a2b3c4d5e6f7a83f9c1a');
+    expect(withCvFileSuffix(once, '66f1a2b3c4d5e6f7a83f9c1a')).toBe(once);
+  });
+
+  it('bo hau to khoi ten khong co phan mo rong', () => {
+    expect(stripCvFileSuffix('2026-09-23_CV_Nguyen_Van_A-3f9c1a')).toBe('2026-09-23_CV_Nguyen_Van_A');
+    expect(stripCvFileSuffix('2026-09-23_CV_Nguyen_Van_A')).toBe('2026-09-23_CV_Nguyen_Van_A');
+  });
+
+  it('tieu de the Kanban giu nguyen hau to de tim lai dung file MD', () => {
+    expect(formatKanbanItemTitle('2026-09-23_CV_Nguyen_Van_A-3f9c1a.md')).toBe('2026-09-23_CV_Nguyen_Van_A-3f9c1a');
   });
 });

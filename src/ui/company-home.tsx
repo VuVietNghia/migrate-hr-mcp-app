@@ -29,7 +29,8 @@ async function askCrawlAgent(app: ReturnType<typeof usePrivosApp>, roomId: strin
     await new Promise((resolve) => window.setTimeout(resolve, 2000));
     const res = await restCall<any>(app, 'GET', 'ai-messages.list', { query: { sessionId, count: 20 }, timeoutMs: 60000 });
     const list = Array.isArray(res?.messages) ? res.messages : [];
-    const aiMsg = [...list].reverse().find((message: any) => message.type === 'ai');
+    // The room session is shared with CV scoring and drafting: only this request's id is ours.
+    const aiMsg = list.find((message: any) => message?._id === aiMessageId);
     if (!aiMsg) continue;
     if (['completed', 'failed', 'cancelled'].includes(aiMsg.status || '')) {
       if (aiMsg.status !== 'completed') throw new Error(`AI dừng với trạng thái ${aiMsg.status}.`);

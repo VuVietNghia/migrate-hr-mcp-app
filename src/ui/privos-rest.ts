@@ -9,7 +9,7 @@
  * Every call runs as the logged-in user and is gated server-side by the app's
  * exact installation grant, so no bespoke tools are needed.
  */
-import type { McpApp, RestRequestParams } from '@privos_ai/app-react';
+import { parseToolResult, type McpApp, type RestRequestParams } from '@privos_ai/app-react';
 
 export class OptionalFeatureUnavailableError extends Error {
   readonly code = 'OPTIONAL_PERMISSION_NOT_GRANTED';
@@ -210,58 +210,31 @@ export async function ensureFolderPath(app: McpApp, channelId: string, folderNam
 
   for (const folderName of folderNames) {
     if (!folderName) continue;
-    
-    // 1. Lấy danh sách folder con trong currentParentId
-    const args: any = { channelId, limit: 100 };
-    if (currentParentId) {
-      args.parentId = currentParentId;
-    }
-    
-    const getRes: any = await app.callServerTool({
+
+    // `readToolList` throws on an `isError` result or an unreadable listing. A failed read must
+    // never look like "folder missing": that used to create another copy of the folder on every
+    // transient Hub error, splitting files across duplicates.
+    const listing = await app.callServerTool({
       name: 'mcpapp.folders.getByChannel',
-      arguments: args
+      arguments: { channelId, limit: 100, ...(currentParentId ? { parentId: currentParentId } : {}) },
     });
-    
-    let folders: any[] = [];
-    try {
-      const text = getRes?.content?.[0]?.text;
-      if (text) {
-        const parsed = JSON.parse(text);
-        folders = Array.isArray(parsed) ? parsed : (parsed?.folders || []);
-      }
-    } catch (e) {
-      console.error('Failed to parse getByChannel response', e);
-    }
-    
-    const existingFolder = folders.find((f: any) => f.name === folderName);
-    
-    if (existingFolder && existingFolder._id) {
+    const existingFolder = readToolList(listing, 'folders').find((f: any) => f?.name === folderName);
+
+    if (existingFolder?._id) {
       currentParentId = existingFolder._id;
-    } else {
-      // 2. Tạo folder nếu chưa tồn tại
-      const createArgs: any = { channelId, name: folderName };
-      if (currentParentId) {
-        createArgs.parentId = currentParentId;
-      }
-      const createRes: any = await app.callServerTool({
-        name: 'mcpapp.folders.create',
-        arguments: createArgs
-      });
-      
-      try {
-        const text = createRes?.content?.[0]?.text;
-        if (text) {
-          const parsed = JSON.parse(text);
-          currentParentId = parsed?._id;
-        }
-      } catch (e) {
-        console.error('Failed to parse create folder response', e);
-      }
-      
-      if (!currentParentId) {
-        throw new Error(`Failed to create folder: ${folderName}`);
-      }
+      continue;
     }
+
+    // `parseToolResult` rejects a refused create. Previously a refused nested create left
+    // `currentParentId` on the parent, and the file was written one level too high.
+    const created: any = parseToolResult(await app.callServerTool({
+      name: 'mcpapp.folders.create',
+      arguments: { channelId, name: folderName, ...(currentParentId ? { parentId: currentParentId } : {}) },
+    }));
+    if (typeof created?._id !== 'string' || !created._id) {
+      throw new Error(`Failed to create folder: ${folderName}`);
+    }
+    currentParentId = created._id;
   }
 
   return currentParentId;
