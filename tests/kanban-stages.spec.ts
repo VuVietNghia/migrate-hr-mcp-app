@@ -16,10 +16,9 @@ const NEW_LIST_STAGES: Record<string, string> = {
 const statuses = (stagesMap: Record<string, string>, hasInboxCards?: boolean) =>
   getCVColumnsForStages(stagesMap, hasInboxCards).map((column) => column.status);
 
-describe('getCVColumnsForStages - cot Dau vao', () => {
-  it('list moi co stage 01_Dau_Vao: Dau vao dung dau, tong 8 cot', () => {
+describe('getCVColumnsForStages - an cot Dau vao', () => {
+  it('khong hien cot Dau vao tren list moi du stage van ton tai trong privos.lists', () => {
     expect(statuses(NEW_LIST_STAGES)).toEqual([
-      '01_Dau_Vao',
       '02_Loai_CV',
       '03_Tiem_Nang',
       '05_Moi_Phong_Van',
@@ -28,16 +27,10 @@ describe('getCVColumnsForStages - cot Dau vao', () => {
       '08_Da_Phong_Van',
       '09_CV_Cu',
     ]);
-    expect(getCVColumnsForStages(NEW_LIST_STAGES)[0]).toEqual({
-      status: '01_Dau_Vao',
-      label: 'Đầu vào',
-      color: '#6b7280',
-    });
   });
 
-  it('list legacy co stage 01_Dau_Vao: Dau vao dung truoc 5 cot legacy', () => {
+  it('khong hien cot Dau vao tren list legacy', () => {
     expect(statuses({ a: '01_Dau_Vao', b: '02_Loai_CV', c: '07_CV_Cu' })).toEqual([
-      '01_Dau_Vao',
       '02_Loai_CV',
       '03_Tiem_Nang',
       '05_Moi_Phong_Van',
@@ -46,7 +39,7 @@ describe('getCVColumnsForStages - cot Dau vao', () => {
     ]);
   });
 
-  it('khong co stage va khong co the o Dau vao: khong co cot Dau vao', () => {
+  it('giu nguyen cac cot con lai khi list khong co stage Dau vao', () => {
     expect(statuses({ b: '02_Loai_CV', c: '09_CV_Cu' })).toEqual([
       '02_Loai_CV',
       '03_Tiem_Nang',
@@ -58,12 +51,12 @@ describe('getCVColumnsForStages - cot Dau vao', () => {
     ]);
   });
 
-  it('khong co stage nhung board co the o Dau vao: van hien cot Dau vao', () => {
-    expect(statuses({ b: '02_Loai_CV', c: '09_CV_Cu' }, true)[0]).toBe('01_Dau_Vao');
-    expect(statuses({}, true)[0]).toBe('01_Dau_Vao');
+  it('khong hien cot Dau vao ke ca khi board van co the o trang thai do', () => {
+    expect(statuses({ b: '02_Loai_CV', c: '09_CV_Cu' }, true)).not.toContain('01_Dau_Vao');
+    expect(statuses({}, true)).not.toContain('01_Dau_Vao');
   });
 
-  it('getCVColumnLabel tra label Dau vao ke ca khi list khong co stage do', () => {
+  it('van doc duoc nhan Dau vao ma khong them no vao cac cot hien thi', () => {
     expect(getCVColumnLabel({}, '01_Dau_Vao')).toBe('Đầu vào');
     expect(getCVColumnLabel(NEW_LIST_STAGES, '01_Dau_Vao')).toBe('Đầu vào');
     expect(getCVColumnLabel(NEW_LIST_STAGES, '03_Tiem_Nang')).toBe('Tiềm năng');

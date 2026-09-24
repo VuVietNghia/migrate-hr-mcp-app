@@ -1187,13 +1187,42 @@ textarea:focus {
 .recruitment-content { margin-top: 30px; }
 .recruitment-category-list { display: flex; gap: 8px; padding-bottom: 25px; border-bottom: 1px solid var(--border); }
 .recruitment-category { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); background: var(--bg-card); font: inherit; font-weight: 650; cursor: pointer; }
-.recruitment-category:hover { border-color: var(--accent); color: var(--accent); }
+.recruitment-category:hover { border-color: var(--accent); }
 .recruitment-category-active { border-color: var(--accent); color: #fff; background: var(--accent); }
 .recruitment-category span { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 50%; color: inherit; background: rgba(255,255,255,.2); font-size: .7rem; }
 .recruitment-category:not(.recruitment-category-active) span { color: var(--accent); background: rgba(21,111,245,.1); }
+.recruitment-department-form { display: flex; align-items: center; gap: 8px; margin: 16px 0 22px; }
+.recruitment-department-form input { flex: 1 1 240px; min-width: 240px; height: 40px; box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); background: var(--bg-card); font: inherit; }
+.recruitment-department-form input:focus { outline: 2px solid rgba(21,111,245,.2); border-color: var(--accent); }
+.recruitment-department-form button { flex: 0 0 auto; height: 40px; box-sizing: border-box; padding: 9px 13px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); background: var(--bg-card); font: inherit; font-weight: 650; white-space: nowrap; cursor: pointer; }
+.recruitment-department-form button[type='submit'] { border-color: var(--accent); color: #fff; background: var(--accent); }
+.recruitment-department-form button:disabled { opacity: .55; cursor: not-allowed; }
+.recruitment-department-error { margin: -12px 0 22px; color: var(--danger); font-size: .83rem; }
 .recruitment-heading { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin: 30px 0 20px; }
 .recruitment-heading h2 { margin: 7px 0 0; color: var(--text); font-size: 1.75rem; letter-spacing: -.035em; }
 .recruitment-heading p { max-width: 355px; margin: 0; color: var(--text-muted); line-height: 1.55; }
+.recruitment-heading-actions { display: flex; align-items: center; gap: 9px; }
+.rename-department-button { padding: 9px 14px; border: 1px solid var(--accent); border-radius: 8px; color: var(--accent); background: var(--bg-card); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
+.rename-department-button:hover { border-color: var(--accent-hover); }
+.rename-department-button:disabled { cursor: not-allowed; opacity: .55; }
+.recruitment-department-modal-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 20px; background: rgba(2,8,16,.62); backdrop-filter: blur(5px); }
+.recruitment-department-modal { width: min(460px, 100%); box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); box-shadow: 0 24px 70px rgba(0,0,0,.36); }
+.recruitment-department-modal-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+.recruitment-department-modal-heading span { color: var(--accent); font-size: .7rem; font-weight: 750; letter-spacing: .12em; }
+.recruitment-department-modal-heading h3 { margin: 6px 0 0; color: var(--text); font-size: 1.25rem; }
+.recruitment-department-modal-heading > button { display: grid; flex: 0 0 32px; width: 32px; height: 32px; padding: 0; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--text-muted); background: transparent; font: inherit; font-size: 1.25rem; cursor: pointer; }
+.recruitment-department-rename-form { display: grid; gap: 16px; margin-top: 22px; }
+.recruitment-department-current-name { display: grid; gap: 5px; margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--surface-2); }
+.recruitment-department-current-name span, .recruitment-department-rename-form label > span { color: var(--text-muted); font-size: .78rem; font-weight: 650; }
+.recruitment-department-current-name strong { color: var(--text); font-size: .95rem; overflow-wrap: anywhere; }
+.recruitment-department-rename-form label { display: grid; gap: 7px; }
+.recruitment-department-rename-form input { width: 100%; height: 42px; box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-input); font: inherit; }
+.recruitment-department-rename-form input:focus { outline: 2px solid rgba(21,111,245,.2); border-color: var(--accent); }
+.recruitment-department-modal-error { margin: -5px 0 0; color: var(--danger); font-size: .83rem; }
+.recruitment-department-modal-actions { display: flex; justify-content: end; gap: 9px; margin-top: 2px; }
+.recruitment-department-modal-actions button { min-height: 40px; padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); background: var(--bg-card); font: inherit; font-weight: 650; cursor: pointer; }
+.recruitment-department-modal-actions button[type='submit'] { border-color: var(--accent); color: #fff; background: var(--accent); }
+.recruitment-department-modal-actions button:disabled, .recruitment-department-modal-heading > button:disabled { cursor: not-allowed; opacity: .55; }
 .job-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .job-card { display: flex; flex-direction: column; min-height: 312px; padding: 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); box-shadow: var(--shadow-card); }
 .job-card:hover { border-color: rgba(21,111,245,.45); box-shadow: var(--shadow-card-hover); }
@@ -1222,6 +1251,7 @@ textarea:focus {
   .job-grid { grid-template-columns: 1fr; }
   .recruitment-heading { display: block; }
   .recruitment-heading p { margin-top: 10px; }
+  .recruitment-heading-actions { margin-top: 16px; }
   .job-detail-columns { grid-template-columns: 1fr; gap: 20px; }
 }
 /* Custom job form */
@@ -1251,6 +1281,10 @@ textarea:focus {
 @media (max-width: 780px) {
   .recruitment-category-list { overflow-x: auto; padding-bottom: 16px; }
   .recruitment-category { white-space: nowrap; }
+  .recruitment-department-form { align-items: stretch; flex-direction: column; }
+  .recruitment-department-form input { flex: 0 0 40px; min-width: 0; width: 100%; box-sizing: border-box; }
+  .recruitment-department-modal { padding: 20px; }
+  .recruitment-department-modal-actions button { flex: 1; }
   .job-form-grid { grid-template-columns: 1fr; }
   .job-form-wide { grid-column: auto; }
 }
