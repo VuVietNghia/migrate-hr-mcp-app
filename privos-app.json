@@ -106,9 +106,9 @@
     }
   ],
   "dataPolicy": {
-    "version": "2026-08-02",
+    "version": "2026-09-24",
     "retention": "App data is retained until the installation or corresponding HR records are deleted.",
-    "externalProcessing": false
+    "externalProcessing": true
   },
   "availabilityTier": "single",
   "capabilities": {
