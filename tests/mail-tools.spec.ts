@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VerifiedActor } from '@privos_ai/app-server';
 import { handleMailTool, setMailToolDependencies } from '../src/mail-tools';
+import { MailError } from '../src/services/mail/mail-errors';
 
 const actor = Object.freeze({
   userId: 'u1',
@@ -25,10 +26,10 @@ const base = {
  * Failures come back as an MCP `isError` result, not a throw: a thrown Error reaches the UI as the
  * SDK's bare "Internal error", which hid the real reason for every failed send.
  */
-async function expectToolError(call: Promise<unknown>, reason: string): Promise<void> {
+async function expectToolError(call: Promise<unknown>, _reason: string): Promise<void> {
   const result = (await call) as { isError?: boolean; content: Array<{ text: string }> };
   expect(result.isError).toBe(true);
-  expect(result.content[0].text).toContain(reason);
+  expect(JSON.parse(result.content[0].text)).toMatchObject({ code: expect.stringMatching(/^MAIL_/) });
 }
 
 describe('hrm.mail.* tools', () => {
@@ -40,7 +41,7 @@ describe('hrm.mail.* tools', () => {
     retry = vi.fn(async () => ({ id: 'I1', status: 'sent' }));
     seenRoom = undefined;
     setMailToolDependencies({
-      createTrackedMail: (roomId: string) => {
+      createTrackedMail: async (roomId: string) => {
         seenRoom = roomId;
         return { send, retry } as never;
       },
@@ -70,13 +71,13 @@ describe('hrm.mail.* tools', () => {
 
   it('surfaces the real delivery failure instead of a bare "Internal error"', async () => {
     const deliver = vi.fn(async () => {
-      throw new Error('EmailJS rejected the message (429)');
+      throw new MailError('MAIL_RATE_LIMITED', 30, new Error('provider token=secret'));
     });
-    setMailToolDependencies({ createTrackedMail: () => ({ send, retry, deliver }) as never });
+    setMailToolDependencies({ createTrackedMail: async () => ({ send, retry, deliver }) as never });
 
     await expectToolError(
       handleMailTool('hrm.mail.send', { ...base, recordHistory: false }, actor),
-      'EmailJS rejected the message (429)',
+      'MAIL_RATE_LIMITED',
     );
   });
 
@@ -117,7 +118,7 @@ describe('hrm.mail.* tools', () => {
 
   it('with recordHistory: false only delivers (sanitized) and returns the verified requestedBy', async () => {
     const deliver = vi.fn(async () => undefined);
-    setMailToolDependencies({ createTrackedMail: () => ({ send, retry, deliver }) as never });
+    setMailToolDependencies({ createTrackedMail: async () => ({ send, retry, deliver }) as never });
 
     const result = await handleMailTool('hrm.mail.send', { ...base, recordHistory: false, requestedBy: 'spoofed' }, actor);
 

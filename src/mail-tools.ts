@@ -7,10 +7,9 @@
 import type { VerifiedActor } from '@privos_ai/app-server';
 
 import { resolveActorRoom } from './payroll-tools';
-import { createRoomHubToolCaller } from './services/hub-tool-caller';
-import { EmailHistoryRepository } from './services/mail/email-history-repository';
 import { sanitizeEmailHtml } from './services/mail/html-sanitizer';
-import { MailRelayService } from './services/mail/mail-relay-service';
+import { createTrackedMail } from './services/mail/mail-runtime';
+import { toPublicMailError } from './services/mail/mail-errors';
 import { TrackedMailService } from './services/mail/tracked-mail-service';
 import { isValidEmailAddress } from './ui/utils/email-validation';
 
@@ -22,7 +21,7 @@ export const MAIL_TOOL_DEFINITIONS = [
 		name: 'hrm.mail.send',
 		title: 'Send HR email',
 		description:
-			'Send one email through the HR relay and record it in the room email history. Requires a Hub-verified actor.',
+			'Send one email through the Room mailbox and record it in the room email history. Requires a Hub-verified actor.',
 		inputSchema: {
 			type: 'object',
 			properties: {
@@ -35,8 +34,6 @@ export const MAIL_TOOL_DEFINITIONS = [
 				cvItemId: { type: 'string' },
 				cvListId: { type: 'string' },
 				jdName: { type: 'string' },
-				// Not yet in privos-app.json (adding it changes the pinned manifest digest); the manifest
-				// schema has no `additionalProperties: false`, so the Hub already forwards it.
 				recordHistory: { type: 'boolean' },
 			},
 			required: ['source', 'toName', 'toEmail', 'subject', 'htmlContent'],
@@ -61,17 +58,13 @@ export function isMailTool(name: unknown): name is MailToolName {
 const MAX_SUBJECT = 500;
 const MAX_HTML = 200_000;
 
-// One relay (one queue) per process — the rate limit is per EmailJS account, not per room.
-const relay = new MailRelayService();
-
 type TrackedMail = Pick<TrackedMailService, 'send' | 'retry' | 'deliver'>;
-let dependencies: { createTrackedMail: (roomId: string) => TrackedMail } = {
-	createTrackedMail: (roomId) =>
-		new TrackedMailService(new EmailHistoryRepository(createRoomHubToolCaller(roomId)), relay),
+let dependencies: { createTrackedMail: (roomId: string) => Promise<TrackedMail> } = {
+	createTrackedMail,
 };
 
 /** Test seam. */
-export function setMailToolDependencies(deps: { createTrackedMail: (roomId: string) => TrackedMail }): void {
+export function setMailToolDependencies(deps: { createTrackedMail: (roomId: string) => Promise<TrackedMail> }): void {
 	dependencies = deps;
 }
 
@@ -95,32 +88,33 @@ function optionalString(args: Record<string, unknown>, key: string, max = 256): 
 
 /**
  * A thrown `Error` reaches the operator as the SDK's bare "Internal error" (-32603): the SDK keeps a
- * thrown message only for JSON-RPC protocol codes. That hid every real mail failure — an EmailJS
- * rejection, a timeout, a missing EMAILJS_* variable all read the same. A tool-level failure is
+ * thrown message only for JSON-RPC protocol codes. That hid every real mail failure. A tool-level failure is
  * returned as an MCP `isError` result instead, whose text `parseToolResult` rethrows in the UI.
  *
- * Every message that can land here is already safe to show: the relay deliberately drops EmailJS's
- * response body (it can echo the access token) and names missing variables, never their values.
+ * Every returned message is mapped to a public mail error before it reaches the caller.
  */
 export async function handleMailTool(name: MailToolName, rawArgs: unknown, actor: VerifiedActor | undefined) {
 	try {
 		return await runMailTool(name, rawArgs, actor);
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
-		console.error('[hrm.mail] THẤT BẠI', { tool: name, reason });
-		return { content: [{ type: 'text' as const, text: reason }], isError: true };
+		const safe = toPublicMailError(error);
+		console.error('[hrm.mail] failed', { tool: name, code: safe.code });
+		return { content: [{ type: 'text' as const, text: JSON.stringify(safe) }], isError: true };
 	}
 }
 
 async function runMailTool(name: MailToolName, rawArgs: unknown, actor: VerifiedActor | undefined) {
 	const args = asRecord(rawArgs);
 	const roomId = resolveActorRoom(args, actor);
-	const tracked = dependencies.createTrackedMail(roomId);
+	const tracked = await dependencies.createTrackedMail(roomId);
 
 	if (name === 'hrm.mail.retry') {
 		const itemId = requireString(args, 'itemId', 128);
-		const record = await tracked.retry(roomId, itemId);
-		return { content: [{ type: 'text' as const, text: JSON.stringify({ itemId: record.id, status: record.status }) }] };
+		const outcome = await tracked.retry(roomId, itemId);
+		const result = outcome.status === 'sent'
+			? { itemId: outcome.record.id, status: outcome.record.status, receipt: outcome.receipt }
+			: { itemId: null, status: 'sent_unlogged' as const, receipt: outcome.receipt };
+		return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
 	}
 
 	const source = args.source;
@@ -149,15 +143,15 @@ async function runMailTool(name: MailToolName, rawArgs: unknown, actor: Verified
 	// path needs the installation-bot credential that only a workspace admin can issue. `requestedBy`
 	// is still returned from the verified actor so the UI never has to trust its own claim.
 	if (args.recordHistory === false) {
-		await tracked.deliver(payload);
-		const delivered = { itemId: null, status: 'delivered' as const, requestedBy: actor!.userId };
+		const receipt = await tracked.deliver(payload);
+		const delivered = { itemId: null, status: 'delivered' as const, requestedBy: actor!.userId, receipt };
 		return { content: [{ type: 'text' as const, text: JSON.stringify(delivered) }] };
 	}
 
 	const outcome = await tracked.send({ roomId, ...payload, requestedBy: actor!.userId });
 	// `historyError` stays server-side: the UI only needs to know the mail went out unlogged.
 	const result = outcome.status === 'sent'
-		? { itemId: outcome.record.id, status: outcome.record.status }
-		: { itemId: null, status: 'sent_unlogged' as const };
+		? { itemId: outcome.record.id, status: outcome.record.status, receipt: outcome.receipt }
+		: { itemId: null, status: 'sent_unlogged' as const, receipt: outcome.receipt };
 	return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
 }

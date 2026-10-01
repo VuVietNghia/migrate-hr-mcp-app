@@ -29,6 +29,7 @@ const SCOPE_BY_TOOL: Readonly<Record<string, string>> = {
 	'mcpapp.lists.getItem': 'lists:read',
 	'mcpapp.stages.getByList': 'lists:read',
 	'mcpapp.lists.create': 'lists:write',
+	'mcpapp.lists.addField': 'lists:write',
 	'mcpapp.lists.createItem': 'lists:write',
 	'mcpapp.lists.updateItem': 'lists:write',
 	'mcpapp.lists.moveItemToStage': 'lists:write',

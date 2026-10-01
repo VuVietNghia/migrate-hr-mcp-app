@@ -1,10 +1,14 @@
 export const EMAIL_HISTORY_LIST_NAME = 'Quản lí Email';
 
+export const MAIL_SEND_UNKNOWN_MARKER = '[MAIL_SEND_UNKNOWN]';
+
 export const EMAIL_HISTORY_STAGES = {
   interviewSent: 'Email Phỏng vấn - Đã gửi',
   interviewFailed: 'Email Phỏng vấn - Gửi lỗi',
   employeeSent: 'Email Nhân sự - Đã gửi',
   employeeFailed: 'Email Nhân sự - Gửi lỗi',
+  interviewUnknown: 'Email Phỏng vấn - Chưa rõ kết quả',
+  employeeUnknown: 'Email Nhân sự - Chưa rõ kết quả',
 } as const;
 
 export const EMAIL_HISTORY_FIELD_IDS = {
@@ -23,9 +27,13 @@ export const EMAIL_HISTORY_FIELD_IDS = {
   attemptCount: 'attempt_count',
   lastError: 'last_error',
   requestedBy: 'requested_by',
+  provider: 'provider',
+  senderEmail: 'sender_email',
+  connectionRevision: 'connection_revision',
+  providerMessageId: 'provider_message_id',
 } as const;
 
-export type EmailHistoryStatus = 'sent' | 'failed';
+export type EmailHistoryStatus = 'sent' | 'failed' | 'unknown';
 export type EmailHistoryFilter = EmailHistoryStatus | 'all' | 'templates';
 export type EmailSource = 'cv_scored' | 'lifecycle';
 export type EmailSourceFilter = EmailSource | 'all';
@@ -40,6 +48,8 @@ export interface EmailHistoryStageIds {
   interviewFailed: string;
   employeeSent: string;
   employeeFailed: string;
+  interviewUnknown?: string;
+  employeeUnknown?: string;
 }
 
 export interface StoredEmailPayload {
@@ -64,6 +74,10 @@ export interface EmailHistoryRecord extends StoredEmailPayload {
   attemptCount: number;
   lastError?: string;
   requestedBy?: string;
+  provider?: 'google' | 'microsoft';
+  senderEmail?: string;
+  connectionRevision?: string;
+  providerMessageId?: string;
 }
 
 type PrivOSCustomField = {
@@ -100,6 +114,8 @@ function getStatus(
   if (stageId === stages.interviewFailed) return { status: 'failed', source: 'cv_scored' };
   if (stageId === stages.employeeSent) return { status: 'sent', source: 'lifecycle' };
   if (stageId === stages.employeeFailed) return { status: 'failed', source: 'lifecycle' };
+  if (stageId === stages.interviewUnknown) return { status: 'unknown', source: 'cv_scored' };
+  if (stageId === stages.employeeUnknown) return { status: 'unknown', source: 'lifecycle' };
   return null;
 }
 
@@ -148,12 +164,19 @@ export function parseEmailHistoryItem(
   const attemptCount = Number.isFinite(parsedAttemptCount) && parsedAttemptCount >= 1
     ? Math.floor(parsedAttemptCount)
     : 1;
+  const rawProvider = asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.provider));
+  const provider = rawProvider === 'google' || rawProvider === 'microsoft' ? rawProvider : undefined;
+
+  const lastError = asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.lastError));
+  const status = stageIdentity.status === 'failed' && lastError?.startsWith(MAIL_SEND_UNKNOWN_MARKER)
+    ? 'unknown'
+    : stageIdentity.status;
 
   return {
     id,
     listId,
     stageId,
-    status: stageIdentity.status,
+    status,
     source: stageIdentity.source,
     recipientName,
     recipientEmail,
@@ -166,8 +189,12 @@ export function parseEmailHistoryItem(
     cvListId: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.cvListId)),
     jdName: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.jdName)),
     sentAt: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.sentAt)),
-    lastError: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.lastError)),
+    lastError,
     requestedBy: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.requestedBy)),
+    provider,
+    senderEmail: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.senderEmail)),
+    connectionRevision: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.connectionRevision)),
+    providerMessageId: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.providerMessageId)),
   };
 }
 

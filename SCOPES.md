@@ -23,5 +23,10 @@ of the current user's session. Both refuse any call without a Hub-verified actor
 request to `actor.roomId` (`payroll-tools.ts resolveActorRoom`). The Hub still enforces installation
 status, receipt, epoch, target room, exact grant, and bot membership on every mediated operation.
 
+`hrm.mail.connection.*` uses the same verified actor and Room pinning. Every verified Room member
+may get, connect, replace, or disconnect the shared mailbox; there is no owner-role gate. The
+`hr_mail_connections` collection stores one bounded metadata record per Room and queries by the
+unique `{roomId:1}` index with `limit:1`. Provider credentials remain at Nango.
+
 The app-owned `hr_bulk_export` tool does not request a workspace permission. It processes caller
 input and is gated by the Pro license feature.

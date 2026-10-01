@@ -106,9 +106,14 @@
     }
   ],
   "dataPolicy": {
-    "version": "2026-09-24",
+    "version": "2026-09-30",
     "retention": "App data is retained until the installation or corresponding HR records are deleted.",
-    "externalProcessing": true
+    "externalProcessing": true,
+    "externalDestinations": [
+      "Nango",
+      "Google Gmail API",
+      "Microsoft Graph API"
+    ]
   },
   "availabilityTier": "single",
   "capabilities": {
@@ -135,7 +140,8 @@
         "resourceUri": "ui://ai.privos.mcp-app-demo-hr-hrm/form.html",
         "csp": {
           "frame-src": [
-            "https://www.youtube.com"
+            "https://www.youtube.com",
+            "https://connect.nango.dev"
           ]
         }
       }
@@ -252,9 +258,61 @@
       }
     },
     {
+      "name": "hrm.mail.connection.get",
+      "title": "Get Room mail connection",
+      "description": "Return the shared sender mailbox status for the verified Room.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "hrm.mail.connection.begin",
+      "title": "Begin Room mail connection",
+      "description": "Create a restricted Nango Connect session for Google or Microsoft mail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" },
+          "provider": { "type": "string", "enum": ["google", "microsoft"] },
+          "expectedRevision": { "type": ["string", "null"] }
+        },
+        "required": ["provider", "expectedRevision"]
+      }
+    },
+    {
+      "name": "hrm.mail.connection.complete",
+      "title": "Complete Room mail connection",
+      "description": "Verify and activate the candidate Nango connection for the verified Room.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" },
+          "attemptId": { "type": "string" },
+          "candidateConnectionId": { "type": "string" }
+        },
+        "required": ["attemptId", "candidateConnectionId"]
+      }
+    },
+    {
+      "name": "hrm.mail.connection.disconnect",
+      "title": "Disconnect Room mail connection",
+      "description": "Deactivate the shared sender mailbox and remove its Nango connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" },
+          "expectedRevision": { "type": "string" }
+        },
+        "required": ["expectedRevision"]
+      }
+    },
+    {
       "name": "hrm.mail.send",
       "title": "Send HR email",
-      "description": "Send one email through the HR relay and record it in the room email history. Requires a Hub-verified actor.",
+      "description": "Send one email through the Room mailbox and record it in the room email history. Requires a Hub-verified actor.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -288,6 +346,9 @@
           },
           "jdName": {
             "type": "string"
+          },
+          "recordHistory": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -383,30 +444,6 @@
       "description": "This app's agent bot Hub user id, paired with PRIVOS_AGENT_BOT_CREDENTIAL for REST auth. Written only by a workspace admin from this app's settings page.",
       "required": false,
       "secret": false
-    },
-    {
-      "key": "EMAILJS_SERVICE_ID",
-      "description": "EmailJS service id used by the server-side HR mail relay.",
-      "required": true,
-      "secret": true
-    },
-    {
-      "key": "EMAILJS_TEMPLATE_ID",
-      "description": "EmailJS template id; the template must expose name, to_name, to_email, subject, message.",
-      "required": true,
-      "secret": true
-    },
-    {
-      "key": "EMAILJS_PUBLIC_KEY",
-      "description": "EmailJS public key (user_id) for the relay account.",
-      "required": true,
-      "secret": true
-    },
-    {
-      "key": "EMAILJS_PRIVATE_KEY",
-      "description": "EmailJS private key sent as accessToken; required for non-browser API calls.",
-      "required": true,
-      "secret": true
     }
   ],
   "resourceManifestTemplate": []

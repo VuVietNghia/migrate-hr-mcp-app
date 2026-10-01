@@ -9,6 +9,7 @@ import {
 } from '../../services/mail/email-history-model';
 import { restCall } from '../privos-rest';
 import { UserSessionTrackedMail } from './user-session-tracked-mail';
+import type { UiMailSendResult } from './user-session-tracked-mail';
 import { fetchAllListItems } from '../list-item-paging';
 
 /**
@@ -50,8 +51,17 @@ function resolveStageIds(stages: unknown): EmailHistoryStageIds | null {
   const interviewFailed = ids.get(EMAIL_HISTORY_STAGES.interviewFailed);
   const employeeSent = ids.get(EMAIL_HISTORY_STAGES.employeeSent);
   const employeeFailed = ids.get(EMAIL_HISTORY_STAGES.employeeFailed);
+  const interviewUnknown = ids.get(EMAIL_HISTORY_STAGES.interviewUnknown);
+  const employeeUnknown = ids.get(EMAIL_HISTORY_STAGES.employeeUnknown);
   return interviewSent && interviewFailed && employeeSent && employeeFailed
-    ? { interviewSent, interviewFailed, employeeSent, employeeFailed }
+    ? {
+        interviewSent,
+        interviewFailed,
+        employeeSent,
+        employeeFailed,
+        ...(interviewUnknown ? { interviewUnknown } : {}),
+        ...(employeeUnknown ? { employeeUnknown } : {}),
+      }
     : null;
 }
 
@@ -93,8 +103,8 @@ export class EmailHistoryService {
   }
 
   /** Runs over the user session (see `UserSessionTrackedMail`), not the bot-credential `hrm.mail.retry`. */
-  async retry(roomId: string, itemId: string): Promise<void> {
-    await new UserSessionTrackedMail(this.app).retry(roomId, itemId);
+  async retry(roomId: string, itemId: string): Promise<UiMailSendResult> {
+    return new UserSessionTrackedMail(this.app).retry(roomId, itemId);
   }
 
   async delete(itemId: string): Promise<void> {

@@ -400,7 +400,7 @@ export function getInterviewEmailTemplateRowKey(template: InterviewEmailTemplate
  * history source filter: picking a template category must not leave "Tất cả" / "Đã gửi" filtered.
  */
 export function getEmailMailboxContentMode(
-  filter: 'all' | 'sent' | 'failed' | 'templates',
+  filter: 'all' | 'sent' | 'failed' | 'unknown' | 'templates',
   templateFilter: 'all' | EmailTemplateCategory,
   hasRepository: boolean,
 ): 'history' | 'all-templates' | 'interview-templates' | 'employee-templates' | 'template-unavailable' {

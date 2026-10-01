@@ -17,3 +17,12 @@ dist-source/
 
 # Standalone pairing identity (secret: relay creds + dispatch trust) — never commit
 privos-standalone-identity.json
+docker-data/
+
+# Local browser profiles, cookies, sessions and tokens
+.superpowers/
+
+# Local preview and mail deployment documents
+/docs/ui-ux-preview/
+/docs/deploy-mail-ubuntu.md
+/docs/mail-platform-contract.md

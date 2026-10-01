@@ -33,4 +33,24 @@ describe('manifest', () => {
       expect(new URL(tool.ui!.resourceUri!).host).toBe(publisherManifest.name);
     }
   });
+
+  it('declares the complete Room mailbox contract without EmailJS environment keys', () => {
+    const toolNames = publisherManifest.tools.map(tool => tool.name);
+    expect(toolNames).toEqual(expect.arrayContaining([
+      'hrm.mail.connection.get',
+      'hrm.mail.connection.begin',
+      'hrm.mail.connection.complete',
+      'hrm.mail.connection.disconnect',
+    ]));
+    const send = publisherManifest.tools.find(tool => tool.name === 'hrm.mail.send');
+    expect(send?.inputSchema.properties).toHaveProperty('recordHistory');
+    expect(publisherManifest.env.some(entry => entry.key.startsWith('EMAILJS_'))).toBe(false);
+    expect(publisherManifest.dataPolicy.externalDestinations).toEqual(expect.arrayContaining([
+      'Nango',
+      'Google Gmail API',
+      'Microsoft Graph API',
+    ]));
+    const dashboard = publisherManifest.tools.find(tool => tool.name === 'hr_management_dashboard');
+    expect(dashboard?.ui?.csp?.['frame-src']).toContain('https://connect.nango.dev');
+  });
 });

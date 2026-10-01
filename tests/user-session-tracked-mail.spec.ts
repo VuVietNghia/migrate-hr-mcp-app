@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   EMAIL_HISTORY_FIELD_IDS,
@@ -14,6 +14,8 @@ const STAGES = [
   { _id: 'st-if', name: EMAIL_HISTORY_STAGES.interviewFailed },
   { _id: 'st-es', name: EMAIL_HISTORY_STAGES.employeeSent },
   { _id: 'st-ef', name: EMAIL_HISTORY_STAGES.employeeFailed },
+  { _id: 'st-iu', name: EMAIL_HISTORY_STAGES.interviewUnknown },
+  { _id: 'st-eu', name: EMAIL_HISTORY_STAGES.employeeUnknown },
 ];
 
 const request: UiMailRequest = {
@@ -29,9 +31,17 @@ const request: UiMailRequest = {
  * Stand-in for the iframe bridge: `hrm.mail.send` plus the mediated list tools, with an in-memory
  * history list that already exists in the Room.
  */
-function createAppStub({ sendFails = false, createItemFails = false } = {}) {
+const receipt = {
+  status: 'accepted' as const,
+  provider: 'microsoft' as const,
+  senderEmail: 'hr@example.com',
+  connectionRevision: 'revision-a',
+};
+
+function createAppStub({ sendFails = false, sendUnknown = false, createItemFails = false, updateItemFails = false, updateItemFailsOnce = false } = {}) {
   const calls: ToolCall[] = [];
   const items = new Map<string, any>();
+  let updateFailures = updateItemFailsOnce ? 1 : 0;
   const ok = (value: unknown) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
 
   const app = {
@@ -40,10 +50,15 @@ function createAppStub({ sendFails = false, createItemFails = false } = {}) {
       const args = call.arguments ?? {};
       switch (call.name) {
         case 'hrm.mail.send':
-          if (sendFails) throw new Error('EmailJS 400: bad template');
-          return ok({ itemId: null, status: 'delivered', requestedBy: 'user-1' });
+          if (sendFails) throw new Error('Provider rejected the message');
+          if (sendUnknown) return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code: 'MAIL_SEND_UNKNOWN', message: 'Không rõ kết quả.' }) }] };
+          return ok({ itemId: null, status: 'delivered', requestedBy: 'user-1', receipt });
         case 'mcpapp.lists.getAll':
           return ok([{ _id: 'list-1', name: EMAIL_HISTORY_LIST_NAME, stages: STAGES }]);
+        case 'mcpapp.lists.get':
+          return ok({ fieldDefinitions: Object.values(EMAIL_HISTORY_FIELD_IDS).map(_id => ({ _id })) });
+        case 'mcpapp.lists.addField':
+          return ok({});
         case 'mcpapp.lists.createItem': {
           if (createItemFails) return { isError: true, content: [{ type: 'text', text: 'lists:write denied' }] };
           const id = `item-${items.size + 1}`;
@@ -56,6 +71,7 @@ function createAppStub({ sendFails = false, createItemFails = false } = {}) {
           items.get(args.itemId).stageId = args.stageId;
           return ok({});
         case 'mcpapp.lists.updateItem':
+          if (updateItemFails || updateFailures-- > 0) return { isError: true, content: [{ type: 'text', text: 'lists:write denied' }] };
           items.get(args.itemId).customFields = args.customFields;
           return ok({});
         default:
@@ -74,7 +90,7 @@ describe('UserSessionTrackedMail', () => {
   it('delivers without server history, then writes a sent row with the verified requestedBy', async () => {
     const { app, calls, items } = createAppStub();
 
-    await expect(new UserSessionTrackedMail(app).send(request)).resolves.toEqual({ logged: true });
+    await expect(new UserSessionTrackedMail(app).send(request)).resolves.toEqual({ logged: true, receipt });
 
     expect(calls[0]).toEqual({ name: 'hrm.mail.send', arguments: { ...request, recordHistory: false } });
     const [row] = [...items.values()];
@@ -86,17 +102,27 @@ describe('UserSessionTrackedMail', () => {
   it('records a failed row and rethrows when delivery fails', async () => {
     const { app, items } = createAppStub({ sendFails: true });
 
-    await expect(new UserSessionTrackedMail(app).send(request)).rejects.toThrow('EmailJS 400');
+    await expect(new UserSessionTrackedMail(app).send(request)).rejects.toThrow('Provider rejected');
 
     const [row] = [...items.values()];
     expect(row.stageId).toBe('st-ef');
-    expect(field(row, EMAIL_HISTORY_FIELD_IDS.lastError)).toContain('EmailJS 400');
+    expect(field(row, EMAIL_HISTORY_FIELD_IDS.lastError)).toContain('Provider rejected');
   });
 
   it('reports a delivered-but-unlogged email instead of throwing, so nobody resends it', async () => {
     const { app } = createAppStub({ createItemFails: true });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await expect(new UserSessionTrackedMail(app).send(request)).resolves.toEqual({ logged: false });
+    await expect(new UserSessionTrackedMail(app).send(request)).resolves.toEqual({ logged: false, receipt });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('lists:write denied');
+    warning.mockRestore();
+  });
+
+  it('records an ambiguous send in the unknown stage and does not convert it to failed', async () => {
+    const { app, items } = createAppStub({ sendUnknown: true });
+    await expect(new UserSessionTrackedMail(app).send(request)).rejects.toMatchObject({ code: 'MAIL_SEND_UNKNOWN' });
+    const [row] = [...items.values()];
+    expect(row.stageId).toBe('st-eu');
   });
 
   it('retries a failed row and moves that same row to sent', async () => {
@@ -111,5 +137,17 @@ describe('UserSessionTrackedMail', () => {
     expect(items.size).toBe(1);
     expect(items.get(failedRow._id).stageId).toBe('st-es');
     expect(field(items.get(failedRow._id), EMAIL_HISTORY_FIELD_IDS.attemptCount)).toBe(2);
+  });
+
+  it('marks an accepted retry unknown when the sent history update fails', async () => {
+    const failing = createAppStub({ sendFails: true });
+    await expect(new UserSessionTrackedMail(failing.app).send(request)).rejects.toThrow();
+    const [failedRow] = [...failing.items.values()];
+    const retry = createAppStub({ updateItemFailsOnce: true });
+    retry.items.set(failedRow._id, failedRow);
+
+    await expect(new UserSessionTrackedMail(retry.app).retry('room-1', failedRow._id)).resolves.toMatchObject({ logged: false });
+    expect(retry.items.get(failedRow._id).stageId).toBe('st-eu');
+    expect(field(retry.items.get(failedRow._id), EMAIL_HISTORY_FIELD_IDS.lastError)).toContain('[MAIL_SEND_UNKNOWN]');
   });
 });

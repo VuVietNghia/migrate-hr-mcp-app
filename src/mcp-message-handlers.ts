@@ -28,6 +28,11 @@ import { createLicenseGuard } from './license';
 import { checkAgentBotCredential } from './agent-bot-credential-check';
 import { PAYROLL_TOOL_DEFINITIONS, handlePayrollTool, isPayrollTool } from './payroll-tools';
 import { MAIL_TOOL_DEFINITIONS, handleMailTool, isMailTool } from './mail-tools';
+import {
+	MAIL_CONNECTION_TOOL_DEFINITIONS,
+	handleMailConnectionTool,
+	isMailConnectionTool,
+} from './mail-connection-tools';
 const pkg = _pkg as Record<string, any>;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const TOOL_NAME = 'hr_management_dashboard';
@@ -277,6 +282,7 @@ export async function handleMcpMessage(
 					},
 					...PAYROLL_TOOL_DEFINITIONS,
 					...MAIL_TOOL_DEFINITIONS,
+					...MAIL_CONNECTION_TOOL_DEFINITIONS,
 				],
 			};
 
@@ -299,6 +305,9 @@ export async function handleMcpMessage(
 			}
 			if (isMailTool(params?.name)) {
 				return handleMailTool(params.name, params?.arguments, actor);
+			}
+			if (isMailConnectionTool(params?.name)) {
+				return handleMailConnectionTool(params.name, params?.arguments, actor);
 			}
 			if (params?.name !== TOOL_NAME) {
 				throw new Error(`Unknown tool: ${params?.name || '<missing>'}`);

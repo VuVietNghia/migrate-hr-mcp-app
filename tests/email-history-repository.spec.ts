@@ -65,6 +65,30 @@ describe('EmailHistoryRepository', () => {
     ]);
     expect(hub.calls[2][1]).toMatchObject({ listId: 'L1', stageId: 'st0', title: 'Hi' });
     expect(hub.calls[3][1]).toEqual({ itemId: 'I1', stageId: 'st0' });
+    const createList = hub.calls.find(([name]) => name === 'mcpapp.lists.create')?.[1];
+    expect(createList?.stages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: EMAIL_HISTORY_STAGES.interviewUnknown }),
+      expect.objectContaining({ name: EMAIL_HISTORY_STAGES.employeeUnknown }),
+    ]));
+  });
+
+  it('stores provider receipt metadata on a sent row', async () => {
+    const hub = fakeHub(true);
+    const repo = new EmailHistoryRepository(hub.call);
+    await repo.createResult('room-1', payload, 'sent', undefined, 'u1', {
+      status: 'accepted',
+      provider: 'google',
+      senderEmail: 'hr@example.com',
+      connectionRevision: 'revision-a',
+      providerMessageId: 'message-a',
+    });
+    const create = hub.calls.find(([name]) => name === 'mcpapp.lists.createItem')?.[1];
+    expect(create?.customFields).toEqual(expect.arrayContaining([
+      { fieldId: 'provider', value: 'google' },
+      { fieldId: 'sender_email', value: 'hr@example.com' },
+      { fieldId: 'connection_revision', value: 'revision-a' },
+      { fieldId: 'provider_message_id', value: 'message-a' },
+    ]));
   });
 
   it('moves a lifecycle row out of the first stage the Hub drops it into', async () => {
@@ -90,6 +114,48 @@ describe('EmailHistoryRepository', () => {
     await repo.ensureStore('room-1');
     await repo.ensureStore('room-1');
     expect(hub.calls.filter(([n]) => n === 'mcpapp.lists.getAll')).toHaveLength(1);
+  });
+
+  it('adds receipt fields missing from a legacy list exactly once', async () => {
+    const hub = fakeHub(true);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      if (name === 'mcpapp.lists.getAll') {
+        hub.calls.push([name, args]);
+        return [{
+          _id: 'L1',
+          name: EMAIL_HISTORY_LIST_NAME,
+          stages: stageList,
+          fieldDefinitions: [{ _id: 'subject', name: 'Subject', type: 'TEXT' }],
+        }];
+      }
+      return hub.call(name, args);
+    };
+    const repo = new EmailHistoryRepository(call);
+    await repo.ensureStore('room-1');
+    await repo.ensureStore('room-1');
+
+    const added = hub.calls.filter(([name]) => name === 'mcpapp.lists.addField').map(([, args]) => args.fieldId);
+    expect(added).toEqual(['provider', 'sender_email', 'connection_revision', 'provider_message_id']);
+  });
+
+  it('blocks an existing history list until both unknown outcome stages are migrated', async () => {
+    const hub = fakeHub(true);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      if (name === 'mcpapp.lists.getAll') {
+        hub.calls.push([name, args]);
+        return [{ _id: 'L1', name: EMAIL_HISTORY_LIST_NAME, stages: stageList.slice(0, 4) }];
+      }
+      if (name === 'mcpapp.stages.getByList') {
+        hub.calls.push([name, args]);
+        return stageList.slice(0, 4);
+      }
+      return hub.call(name, args);
+    };
+
+    await expect(new EmailHistoryRepository(call).ensureStore('room-1')).rejects.toThrow(
+      'missing both Unknown outcome stages',
+    );
+    expect(hub.calls.map(([name]) => name)).not.toContain('mcpapp.lists.createItem');
   });
 
   it('getRecord fetches ONE item by id instead of scanning the list', async () => {

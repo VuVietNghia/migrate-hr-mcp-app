@@ -171,6 +171,7 @@
 
 .email-filter-icon.is-sent { color: #16a34a; }
 .email-filter-icon.is-failed { color: #dc2626; }
+.email-filter-icon.is-unknown { color: #d97706; }
 
 .email-status-filter strong {
   font-size: 12px;
@@ -233,6 +234,7 @@
 
 .email-row-status.is-sent { color: #16a34a; }
 .email-row-status.is-failed { color: #dc2626; }
+.email-row-status.is-unknown { color: #d97706; }
 
 .email-message-recipient {
   overflow: hidden;
@@ -392,6 +394,7 @@
 
 .email-status-badge.is-sent { color: #166534; background: #dcfce7; }
 .email-status-badge.is-failed { color: #991b1b; background: #fee2e2; }
+.email-status-badge.is-unknown { color: #92400e; background: #fef3c7; }
 
 .email-detail-card {
   width: min(980px, 100%);

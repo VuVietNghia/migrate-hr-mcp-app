@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canRetryEmail,
   filterEmailHistory,
   parseEmailHistoryItem,
   type EmailHistoryRecord,
 } from '../src/services/mail/email-history-model';
 
-const stages = { interviewSent: 's1', interviewFailed: 's2', employeeSent: 's3', employeeFailed: 's4' };
+const stages = {
+  interviewSent: 's1', interviewFailed: 's2', employeeSent: 's3', employeeFailed: 's4',
+  interviewUnknown: 's5', employeeUnknown: 's6',
+};
 const item = (overrides: Record<string, unknown> = {}) => ({
   _id: 'i1',
   listId: 'l1',
@@ -40,6 +44,36 @@ describe('parseEmailHistoryItem', () => {
   it('returns null on unknown stage or missing required field', () => {
     expect(parseEmailHistoryItem(item({ stageId: 'zzz' }), stages)).toBeNull();
     expect(parseEmailHistoryItem(item({ customFields: [] }), stages)).toBeNull();
+  });
+  it('parses unknown rows with optional receipt metadata and never allows retry', () => {
+    const record = parseEmailHistoryItem(item({
+      stageId: 's5',
+      customFields: [
+        ...item().customFields,
+        { fieldId: 'provider', value: 'google' },
+        { fieldId: 'sender_email', value: 'hr@example.com' },
+        { fieldId: 'connection_revision', value: 'revision-a' },
+        { fieldId: 'provider_message_id', value: 'message-a' },
+      ],
+    }), stages)!;
+    expect(record).toMatchObject({ status: 'unknown', provider: 'google', senderEmail: 'hr@example.com' });
+    expect(canRetryEmail(record)).toBe(false);
+  });
+
+  it('keeps reading a legacy sent row when unknown stages and receipt fields are absent', () => {
+    const legacyStages = { interviewSent: 's1', interviewFailed: 's2', employeeSent: 's3', employeeFailed: 's4' };
+    expect(parseEmailHistoryItem(item(), legacyStages)?.status).toBe('sent');
+  });
+
+  it('treats the unknown marker on a legacy failed stage as non-retryable', () => {
+    const legacyStages = { interviewSent: 's1', interviewFailed: 's2', employeeSent: 's3', employeeFailed: 's4' };
+    const marked = item({
+      stageId: 's2',
+      customFields: [...item().customFields, { fieldId: 'last_error', value: '[MAIL_SEND_UNKNOWN] timeout' }],
+    });
+    const record = parseEmailHistoryItem(marked, legacyStages)!;
+    expect(record.status).toBe('unknown');
+    expect(canRetryEmail(record)).toBe(false);
   });
 });
 
