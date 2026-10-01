@@ -41,8 +41,11 @@ export interface MailReceipt {
 
 export interface ConnectSession {
 	sessionToken: string;
+	connectLink: string;
 	expiresAt: string;
 }
+
+export const MAIL_CONNECTION_DISCOVERY_SENTINEL = '__discover__';
 
 export type MailConnectionSummary = Pick<
 	MailConnection,

@@ -37,6 +37,12 @@ export interface NangoGateway {
 		connectionId: string,
 		timeoutMs: number,
 	): Promise<BrokerConnection | null>;
+	findConnectionForAttempt(
+		scope: MailScope,
+		provider: MailProvider,
+		tags: ConnectionTags,
+		timeoutMs: number,
+	): Promise<BrokerConnection | null>;
 	proxy(request: ProxyRequest): Promise<ProxyResponse>;
 	deleteConnection(provider: MailProvider, connectionId: string): Promise<void>;
 }

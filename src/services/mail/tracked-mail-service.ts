@@ -17,7 +17,6 @@ export interface EmailHistoryGateway {
   ): Promise<EmailHistoryRecord>;
   markSent(roomId: string, itemId: string, receipt?: MailReceipt): Promise<EmailHistoryRecord>;
   markFailed(roomId: string, itemId: string, error: unknown): Promise<EmailHistoryRecord>;
-  markUnknown(roomId: string, itemId: string, error: unknown): Promise<EmailHistoryRecord>;
   prepareRetry(
     roomId: string,
     itemId: string,
@@ -37,10 +36,6 @@ export interface MailDeliveryGateway {
 export type SendTrackedMailOutcome =
   | { status: 'sent'; record: EmailHistoryRecord; receipt: MailReceipt }
   | { status: 'sent_unlogged'; receipt: MailReceipt };
-
-function isUnknownSend(error: unknown): boolean {
-  return (error as { code?: unknown } | null)?.code === 'MAIL_SEND_UNKNOWN';
-}
 
 function toDeliveryParams(payload: StoredEmailPayload): MailMessage {
   return {
@@ -81,12 +76,11 @@ export class TrackedMailService {
         await this.history.createResult(
           roomId,
           payload,
-          isUnknownSend(deliveryError) ? 'unknown' : 'failed',
+          'failed',
           deliveryError,
           requestedBy,
         );
       } catch {
-        if (isUnknownSend(deliveryError)) throw deliveryError;
         throw new Error('Gửi email thất bại và không thể lưu lịch sử.');
       }
       throw deliveryError;
@@ -112,8 +106,7 @@ export class TrackedMailService {
           return { status: 'sent_unlogged', receipt };
         }
       } catch (error) {
-        if (isUnknownSend(error)) await this.history.markUnknown(roomId, prepared.record.id, error);
-        else await this.history.markFailed(roomId, prepared.record.id, error);
+        await this.history.markFailed(roomId, prepared.record.id, error);
         throw error;
       }
     } finally {

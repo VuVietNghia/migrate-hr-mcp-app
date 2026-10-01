@@ -22,11 +22,11 @@ interface ConnectSessionRequest {
 }
 
 interface ConnectSessionResponse {
-	data: { token: string; expires_at: string };
+	data: { token: string; connect_link: string; expires_at: string };
 }
 
 interface ListConnectionsRequest {
-	connectionId: string;
+	connectionId?: string;
 	integrationId: string;
 	tags: Record<string, string>;
 	limit: number;
@@ -138,9 +138,61 @@ export class NangoSdkGateway implements NangoGateway {
 				tags: { ...safeTags },
 			});
 			return z
-				.object({ data: z.object({ token: z.string().min(1), expires_at: z.iso.datetime({ offset: true }) }) })
-				.transform(value => ({ sessionToken: value.data.token, expiresAt: value.data.expires_at }))
+				.object({ data: z.object({
+					token: z.string().min(1),
+					connect_link: z.url().refine(link => new URL(link).origin === 'https://connect.nango.dev'),
+					expires_at: z.iso.datetime({ offset: true }),
+				}) })
+				.transform(value => ({
+					sessionToken: value.data.token,
+					connectLink: value.data.connect_link,
+					expiresAt: value.data.expires_at,
+				}))
 				.parse(response);
+		} catch (error) {
+			if (error instanceof MailError) throw error;
+			throw new MailError('MAIL_CONFIGURATION_UNAVAILABLE', undefined, error);
+		}
+	}
+
+	async findConnectionForAttempt(
+		scope: MailScope,
+		provider: MailProvider,
+		tags: ConnectionTags,
+		timeoutMs: number,
+	): Promise<BrokerConnection | null> {
+		try {
+			const safeTags = tagsSchema.parse(tags);
+			if (safeTags.installation_id !== scope.installationId || safeTags.room_id !== scope.roomId) {
+				throw new MailError('MAIL_CONFIGURATION_UNAVAILABLE');
+			}
+			const integrationId = NANGO_INTEGRATION_IDS[provider];
+			const response = await (await this.client(timeoutMs)).listConnections({
+				integrationId,
+				tags: safeTags,
+				limit: 2,
+			});
+			const matches = response.connections.filter(value => {
+				const row = asRecord(value);
+				const rowTags = asRecord(row.tags);
+				return (
+					typeof row.connection_id === 'string' &&
+					row.provider_config_key === integrationId &&
+					rowTags.installation_id === safeTags.installation_id &&
+					rowTags.room_id === safeTags.room_id &&
+					rowTags.actor_id === safeTags.actor_id &&
+					rowTags.attempt_id === safeTags.attempt_id
+				);
+			});
+			if (matches.length === 0) return null;
+			if (matches.length !== 1) throw new MailError('MAIL_CONFIGURATION_UNAVAILABLE');
+			const row = asRecord(matches[0]);
+			return {
+				connectionId: z.string().min(1).max(256).parse(row.connection_id),
+				integrationId,
+				tags: tagsSchema.parse(row.tags),
+				authError: Array.isArray(row.errors) && row.errors.length > 0,
+			};
 		} catch (error) {
 			if (error instanceof MailError) throw error;
 			throw new MailError('MAIL_CONFIGURATION_UNAVAILABLE', undefined, error);

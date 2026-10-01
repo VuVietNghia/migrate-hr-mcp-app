@@ -52,10 +52,18 @@ class FakeBroker implements NangoGateway {
 			tags,
 			authError: false,
 		};
-		return { sessionToken: 'session-token', expiresAt: '2026-09-30T01:10:00.000Z' };
+		return {
+			sessionToken: 'session-token',
+			connectLink: 'https://connect.nango.dev/?session_token=short-lived',
+			expiresAt: '2026-09-30T01:10:00.000Z',
+		};
 	}
 
 	async findConnection(): Promise<BrokerConnection | null> {
+		return this.connection;
+	}
+
+	async findConnectionForAttempt(): Promise<BrokerConnection | null> {
 		return this.connection;
 	}
 
@@ -95,6 +103,21 @@ function fixture(now = Date.parse('2026-09-30T01:00:00.000Z'), maxPendingCleanup
 }
 
 describe('MailConnectionService', () => {
+	it('uses the default runtime UUID generator without losing its receiver', async () => {
+		const repository = new MemoryRepository();
+		const service = new MailConnectionService({
+			repository,
+			broker: new FakeBroker(),
+			adapters: { google: adapter(), microsoft: adapter() },
+			lock: new MailRoomLock(),
+			now: () => Date.parse('2026-09-30T01:00:00.000Z'),
+		});
+
+		await expect(service.begin(actor, 'google', null)).resolves.toMatchObject({
+			attemptId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+		});
+	});
+
 	it('allows a regular verified Room member to connect a mailbox', async () => {
 		const { repository, service } = fixture();
 		const started = await service.begin(actor, 'google', null);
@@ -109,6 +132,22 @@ describe('MailConnectionService', () => {
 		});
 		expect(view.connection).not.toHaveProperty('connectionId');
 		expect(view.connection).not.toHaveProperty('updatedBy');
+		expect(repository.writeCount).toBe(1);
+	});
+
+	it('returns pending until the connect-link connection exists, then completes the exact tagged attempt', async () => {
+		const { broker, repository, service } = fixture();
+		const started = await service.begin(actor, 'google', null);
+		const candidate = broker.connection;
+		broker.connection = null;
+
+		await expect(service.poll(actor, started.attemptId)).resolves.toBeNull();
+		expect(repository.writeCount).toBe(0);
+
+		broker.connection = candidate;
+		await expect(service.poll(actor, started.attemptId)).resolves.toMatchObject({
+			connection: { provider: 'google', senderEmail: 'sender@example.com' },
+		});
 		expect(repository.writeCount).toBe(1);
 	});
 

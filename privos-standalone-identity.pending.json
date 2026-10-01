@@ -1,0 +1,28 @@
+{
+  "pairingVersion": 2,
+  "state": "pending-approval",
+  "relayUrl": "https://roxane-dev.privos.io",
+  "clientId": "LvY8w8AzyHgidPE3g",
+  "clientSecret": "8NKS27SPfv26LqSEtgSpSqGTq2rypsG73qrAsmuY",
+  "mcpAppId": "6abdd49ef5c4dfc46c3494fe",
+  "pairingId": "48603c89-8ecb-4503-902b-b5bf4edecd14",
+  "oauthClientId": "LvY8w8AzyHgidPE3g",
+  "manifestDigest": "sha256:7f9f4782c95024148aebd6db983548d37043dd3d43307fba494a9032b0cad775",
+  "permissionContractHash": "Fp5zi7riqcCBPUJ90NdaMbmKg4tU1sdpGXBTRD0VQ7o",
+  "declaredPermissionCeiling": [
+    "basic:information",
+    "db:read",
+    "db:schema:read",
+    "db:schema:write",
+    "db:write",
+    "files:read",
+    "files:write",
+    "lists:read",
+    "lists:write",
+    "sandbox:ai-chat",
+    "sandbox:ai-chat:write"
+  ],
+  "hubKid": "LxGY62WHaJS4XAyRco_Wt8T_Ao7qoa-npCcGwo-h6F4",
+  "fingerprint": "SHA256:LxGY62WHaJS4XAyRco_Wt8T_Ao7qoa-npCcGwo-h6F4",
+  "createdAt": 1790825630813
+}

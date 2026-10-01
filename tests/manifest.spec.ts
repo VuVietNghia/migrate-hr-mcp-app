@@ -5,6 +5,13 @@ import { createManifest, MARKETPLACE_MANIFEST_FIELDS } from '../src/manifest';
 import { lintManifest } from '@privos_ai/app-server/manifest-tools';
 
 describe('manifest', () => {
+  it('uses the CV Matcher identity for the generated agent bot', () => {
+    expect(publisherManifest.agentBot).toEqual({
+      name: 'CV Matcher Assistant',
+      slug: 'cv-matcher-assistant',
+    });
+  });
+
   it('serves the canonical Marketplace manifest', () => {
     const manifest = createManifest();
     expect(Object.keys(manifest)).toEqual(MARKETPLACE_MANIFEST_FIELDS);
@@ -51,6 +58,31 @@ describe('manifest', () => {
       'Microsoft Graph API',
     ]));
     const dashboard = publisherManifest.tools.find(tool => tool.name === 'hr_management_dashboard');
-    expect(dashboard?.ui?.csp?.['frame-src']).toContain('https://connect.nango.dev');
+    expect(dashboard?.ui?.csp?.frameDomains).toContain('https://connect.nango.dev');
+  });
+
+  it('grants the Room mail agent bot access to its App Database state', () => {
+    const permissions = new Map(
+      publisherManifest.permissions.map(permission => [permission.scope, permission]),
+    );
+
+    for (const scope of ['db:read', 'db:write', 'db:schema:read', 'db:schema:write']) {
+      expect(permissions.get(scope)).toMatchObject({
+        requirement: 'required',
+        context: 'room',
+        executionContext: 'both',
+      });
+    }
+  });
+
+  it('lets an interactive Room member join the app agent bot before mail OAuth', () => {
+    const permission = publisherManifest.permissions.find(entry => entry.scope === 'bot:room:join');
+
+    expect(permission).toMatchObject({
+      requirement: 'required',
+      context: 'room',
+      executionContext: 'user',
+      feature: 'hr.mail.bot.room.join',
+    });
   });
 });

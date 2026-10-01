@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { resolveActorRoom } from './payroll-tools';
 import { resolveOwnMcpAppId } from './resolve-own-mcp-app-id';
+import { MAIL_CONNECTION_DISCOVERY_SENTINEL } from './services/mail/mail-contracts';
 import type { MailConnectionService } from './services/mail/mail-connection-service';
 import { getMailConnectionService } from './services/mail/mail-runtime';
 import { MailError, toPublicMailError } from './services/mail/mail-errors';
@@ -63,7 +64,7 @@ export const MAIL_CONNECTION_TOOL_DEFINITIONS = [
 	},
 ] as const;
 
-type MailConnectionApi = Pick<MailConnectionService, 'get' | 'begin' | 'complete' | 'disconnect'>;
+type MailConnectionApi = Pick<MailConnectionService, 'get' | 'begin' | 'complete' | 'poll' | 'disconnect'>;
 
 let dependencies: {
 	getService: () => MailConnectionApi;
@@ -126,7 +127,9 @@ export async function handleMailConnectionTool(
 					})
 					.strict()
 					.parse(args);
-				result = await service.complete(mailActor, input.attemptId, input.candidateConnectionId);
+				result = input.candidateConnectionId === MAIL_CONNECTION_DISCOVERY_SENTINEL
+					? await service.poll(mailActor, input.attemptId)
+					: await service.complete(mailActor, input.attemptId, input.candidateConnectionId);
 				break;
 			}
 			case 'hrm.mail.connection.disconnect': {

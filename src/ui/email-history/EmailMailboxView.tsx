@@ -11,7 +11,6 @@ import {
   MailOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  QuestionCircleOutlined,
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
@@ -87,20 +86,17 @@ export interface EmailMailboxViewProps {
 const STATUS_LABELS: Record<EmailHistoryStatus, string> = {
   sent: 'Đã gửi',
   failed: 'Gửi lỗi',
-  unknown: 'Chưa rõ kết quả',
 };
 
 const STATUS_ICONS: Record<EmailHistoryStatus, ReactNode> = {
   sent: <CheckCircleOutlined />,
   failed: <CloseCircleOutlined />,
-  unknown: <QuestionCircleOutlined />,
 };
 
 const FILTERS: Array<{ id: EmailHistoryFilter; label: string; icon: ReactNode }> = [
   { id: 'all', label: 'Tất cả', icon: <MailOutlined /> },
   { id: 'sent', label: STATUS_LABELS.sent, icon: STATUS_ICONS.sent },
   { id: 'failed', label: STATUS_LABELS.failed, icon: STATUS_ICONS.failed },
-  { id: 'unknown', label: STATUS_LABELS.unknown, icon: STATUS_ICONS.unknown },
   { id: 'templates', label: 'Mẫu email', icon: <FileTextOutlined /> },
 ];
 
@@ -291,7 +287,6 @@ export function EmailMailboxView({
     all: sourceRecords.length,
     sent: sourceRecords.filter(record => record.status === 'sent').length,
     failed: sourceRecords.filter(record => record.status === 'failed').length,
-    unknown: sourceRecords.filter(record => record.status === 'unknown').length,
     templates: templateFilter === 'all'
       ? templateCounts.cv_scored + templateCounts.lifecycle
       : templateCounts[templateFilter],

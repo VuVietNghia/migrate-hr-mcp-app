@@ -1,0 +1,32 @@
+{
+  "pairingVersion": 2,
+  "relayUrl": "https://roxane-dev.privos.io",
+  "clientId": "LvY8w8AzyHgidPE3g",
+  "clientSecret": "8NKS27SPfv26LqSEtgSpSqGTq2rypsG73qrAsmuY",
+  "trust": {
+    "hubKid": "LxGY62WHaJS4XAyRco_Wt8T_Ao7qoa-npCcGwo-h6F4",
+    "hubPublicJwk": {
+      "crv": "P-256",
+      "kty": "EC",
+      "x": "gk-VS8ZuCnDZsARv4Ha0dDgnWWlbbqQosFpb82e8fio",
+      "y": "v2u7GQNcF36Zbm4q2_woc6Ml4uLE9f_rH4GGBf4AgEM"
+    },
+    "affinity": {
+      "workspaceId": "397f1092-6444-493f-9761-b0fee7cd4861",
+      "deploymentId": "397f1092-6444-493f-9761-b0fee7cd4861",
+      "mcpAppId": "6abdd49ef5c4dfc46c3494fe",
+      "executionMode": "PUBLISHER_HOSTED",
+      "generationId": "3da29dfc-dfa9-4c64-80bd-f4d56a9ac482",
+      "generationNumber": 1,
+      "runtimeInstallationId": "fdb9df7f-be29-4d28-aa96-6941a121c7dc",
+      "manifestDigest": "sha256:7f9f4782c95024148aebd6db983548d37043dd3d43307fba494a9032b0cad775",
+      "resourceManifestHash": "Ic6MRP_q86tZGtL2U4orkUWkzuw-K1mw_0o9egU2wSI",
+      "runtimeResourceInventoryHash": "3d94c4e9eL1NSOt83iHFbFyiupLgQPrGwrWtmGKRiYs",
+      "runtimeApprovalReceiptHash": "-cfjB4c6qR8qpcHaIY_VxOZENHMPmQga6r_J8sGU9Pc",
+      "runtimeAuthorizationEpoch": 1
+    }
+  },
+  "fingerprint": "SHA256:LxGY62WHaJS4XAyRco_Wt8T_Ao7qoa-npCcGwo-h6F4",
+  "mcpAppId": "6abdd49ef5c4dfc46c3494fe",
+  "pairedAt": 1790825670481
+}

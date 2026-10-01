@@ -31,7 +31,6 @@ function history() {
     createResult: vi.fn(async (_r: string, _p: unknown, status: EmailHistoryRecord['status']) => ({ ...record, status })),
     markSent: vi.fn(async () => ({ ...record, status: 'sent' as const })),
     markFailed: vi.fn(async () => record),
-    markUnknown: vi.fn(async () => ({ ...record, status: 'unknown' as const })),
     prepareRetry: vi.fn(async () => ({ record, payload })),
   };
 }
@@ -63,12 +62,12 @@ describe('TrackedMailService', () => {
     warning.mockRestore();
   });
 
-  it('records an ambiguous post-dispatch result as unknown and rethrows it', async () => {
+  it('records an ambiguous post-dispatch result as failed and rethrows it', async () => {
     const h = history();
     const unknown = Object.assign(new Error('safe'), { code: 'MAIL_SEND_UNKNOWN' });
     const svc = new TrackedMailService(h, { queueMail: vi.fn().mockRejectedValue(unknown) });
     await expect(svc.send({ roomId: 'r', requestedBy: 'u1', ...payload })).rejects.toBe(unknown);
-    expect(h.createResult).toHaveBeenCalledWith('r', payload, 'unknown', unknown, 'u1');
+    expect(h.createResult).toHaveBeenCalledWith('r', payload, 'failed', unknown, 'u1');
   });
 
   it('retry: blocks a concurrent retry of the same item', async () => {

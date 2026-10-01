@@ -22,6 +22,13 @@ const mailScopeSchema = z
 	})
 	.strict();
 
+function parseMailScope(scope: MailScope): MailScope {
+	return mailScopeSchema.parse({
+		installationId: scope.installationId,
+		roomId: scope.roomId,
+	});
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -61,7 +68,7 @@ export class AppDbMailConnectionRepository implements MailConnectionRepository {
 	constructor(private readonly callerFactory: (roomId: string) => HubToolCaller = createRoomHubToolCaller) {}
 
 	async read(scope: MailScope): Promise<MailConnection | null> {
-		const safeScope = mailScopeSchema.parse(scope);
+		const safeScope = parseMailScope(scope);
 		try {
 			return (await this.findRecord(safeScope))?.connection ?? null;
 		} catch (error) {
@@ -71,7 +78,7 @@ export class AppDbMailConnectionRepository implements MailConnectionRepository {
 	}
 
 	async write(scope: MailScope, connection: MailConnection): Promise<void> {
-		const safeScope = mailScopeSchema.parse(scope);
+		const safeScope = parseMailScope(scope);
 		const safeConnection = selectWritePayload(connection);
 		if (safeConnection.roomId !== safeScope.roomId) {
 			throw new Error('Mail connection room does not match the verified scope.');

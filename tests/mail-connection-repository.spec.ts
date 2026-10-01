@@ -62,6 +62,16 @@ describe('AppDbMailConnectionRepository', () => {
 		await expect(new AppDbMailConnectionRepository(factory).read(scope)).resolves.toBeNull();
 	});
 
+	it('accepts a verified mail actor carrying userId as a MailScope superset', async () => {
+		const { factory } = caller({
+			'mcpapp.db.query': new Error('Collection not found'),
+		});
+
+		await expect(
+			new AppDbMailConnectionRepository(factory).read({ ...scope, userId: 'user-a' }),
+		).resolves.toBeNull();
+	});
+
 	it('propagates permission failures instead of treating them as no configuration', async () => {
 		const { factory } = caller({ 'mcpapp.db.query': new Error('Insufficient scope: db:read') });
 		await expect(new AppDbMailConnectionRepository(factory).read(scope)).rejects.toThrow(/insufficient scope/i);

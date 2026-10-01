@@ -6,12 +6,15 @@ import manifest from '../privos-app.json';
 import { FileMailSecret } from '../src/services/mail/file-mail-secret';
 
 describe('Room mailbox container configuration', () => {
-	it('mounts the Nango key as a Docker secret and preserves the standalone identity mount', () => {
+	it('mounts the Nango key as a Docker secret and keeps the standalone identity in a Linux volume', () => {
 		const compose = fs.readFileSync(path.resolve('compose.yaml'), 'utf8');
 		expect(compose).toContain('- nango_api_key');
 		expect(compose).toContain('nango_api_key:');
 		expect(compose).toContain('file: ./docker-data/secrets/nango_api_key');
-		expect(compose).toContain('./docker-data/identity:/run/privos/identity');
+		expect(compose).toContain('privos_identity:/run/privos/identity');
+		expect(compose).toContain('name: privos_hr_identity');
+		expect(compose).toContain('external: true');
+		expect(compose).not.toContain('./docker-data/identity:/run/privos/identity');
 	});
 
 	it('does not declare mail provider secrets as environment variables', () => {

@@ -14,8 +14,6 @@ const STAGES = [
   { _id: 'st-if', name: EMAIL_HISTORY_STAGES.interviewFailed },
   { _id: 'st-es', name: EMAIL_HISTORY_STAGES.employeeSent },
   { _id: 'st-ef', name: EMAIL_HISTORY_STAGES.employeeFailed },
-  { _id: 'st-iu', name: EMAIL_HISTORY_STAGES.interviewUnknown },
-  { _id: 'st-eu', name: EMAIL_HISTORY_STAGES.employeeUnknown },
 ];
 
 const request: UiMailRequest = {
@@ -118,11 +116,12 @@ describe('UserSessionTrackedMail', () => {
     warning.mockRestore();
   });
 
-  it('records an ambiguous send in the unknown stage and does not convert it to failed', async () => {
+  it('records an ambiguous send in Gửi lỗi and marks it as non-retryable', async () => {
     const { app, items } = createAppStub({ sendUnknown: true });
     await expect(new UserSessionTrackedMail(app).send(request)).rejects.toMatchObject({ code: 'MAIL_SEND_UNKNOWN' });
     const [row] = [...items.values()];
-    expect(row.stageId).toBe('st-eu');
+    expect(row.stageId).toBe('st-ef');
+    expect(field(row, EMAIL_HISTORY_FIELD_IDS.lastError)).toContain('[MAIL_SEND_UNKNOWN]');
   });
 
   it('retries a failed row and moves that same row to sent', async () => {
@@ -139,7 +138,7 @@ describe('UserSessionTrackedMail', () => {
     expect(field(items.get(failedRow._id), EMAIL_HISTORY_FIELD_IDS.attemptCount)).toBe(2);
   });
 
-  it('marks an accepted retry unknown when the sent history update fails', async () => {
+  it('keeps an accepted-but-unlogged retry in Gửi lỗi and prevents another retry', async () => {
     const failing = createAppStub({ sendFails: true });
     await expect(new UserSessionTrackedMail(failing.app).send(request)).rejects.toThrow();
     const [failedRow] = [...failing.items.values()];
@@ -147,7 +146,7 @@ describe('UserSessionTrackedMail', () => {
     retry.items.set(failedRow._id, failedRow);
 
     await expect(new UserSessionTrackedMail(retry.app).retry('room-1', failedRow._id)).resolves.toMatchObject({ logged: false });
-    expect(retry.items.get(failedRow._id).stageId).toBe('st-eu');
+    expect(retry.items.get(failedRow._id).stageId).toBe('st-ef');
     expect(field(retry.items.get(failedRow._id), EMAIL_HISTORY_FIELD_IDS.lastError)).toContain('[MAIL_SEND_UNKNOWN]');
   });
 });

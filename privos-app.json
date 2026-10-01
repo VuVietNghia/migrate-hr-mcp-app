@@ -1,9 +1,9 @@
 {
   "schemaVersion": 3,
   "kind": "mcp-app",
-  "name": "ai.privos.mcp-app-demo-hr-hrm",
+  "name": "ai.privos.mcp-app-cv-matcher-dev",
   "version": "3.0.12",
-  "title": "PrivOS HR MCP App",
+  "title": "CV Matcher App",
   "description": "HR Mini App for PrivOS: recruitment pipeline with AI CV scoring, scored-CV kanban, JD editor, employee lifecycle, payroll, drafting bot and email history.",
   "icon": "/public/icon.svg",
   "author": {
@@ -21,6 +21,14 @@
       "executionContext": "both",
       "feature": "core.context",
       "reason": "Identify the approved installation and room so every HR tab loads the right room’s data."
+    },
+    {
+      "scope": "bot:room:join",
+      "requirement": "required",
+      "context": "room",
+      "executionContext": "user",
+      "feature": "hr.mail.bot.room.join",
+      "reason": "Join the app installation agent bot to the current Room before starting mailbox OAuth so bot App Database calls are authorized."
     },
     {
       "scope": "lists:read",
@@ -58,7 +66,7 @@
       "scope": "db:read",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.read",
       "reason": "Read this room’s payroll records, active email-template settings and recruitment departments through mcpapp.db.query; installation-bot payroll calls remain pinned to the verified caller room."
     },
@@ -66,7 +74,7 @@
       "scope": "db:write",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.manage",
       "reason": "Create and update this room’s payroll records, active email-template settings and recruitment departments through mcpapp.db.create/update."
     },
@@ -74,7 +82,7 @@
       "scope": "db:schema:read",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.schema.read",
       "reason": "Read the payroll collection schema (mcpapp.db.getSchema) when diagnosing a room."
     },
@@ -82,7 +90,7 @@
       "scope": "db:schema:write",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.schema.manage",
       "reason": "Register room-scoped payroll, email-template settings and recruitment-department collections on first write (mcpapp.db.registerCollection)."
     },
@@ -120,8 +128,8 @@
     "verifiedActor": true
   },
   "agentBot": {
-    "name": "PrivOS Demo Assistant",
-    "slug": "privos-demo-assistant"
+    "name": "CV Matcher Assistant",
+    "slug": "cv-matcher-assistant"
   },
   "tools": [
     {
@@ -137,9 +145,9 @@
         }
       },
       "ui": {
-        "resourceUri": "ui://ai.privos.mcp-app-demo-hr-hrm/form.html",
+        "resourceUri": "ui://ai.privos.mcp-app-cv-matcher-dev/form.html",
         "csp": {
-          "frame-src": [
+          "frameDomains": [
             "https://www.youtube.com",
             "https://connect.nango.dev"
           ]

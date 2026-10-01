@@ -7,8 +7,6 @@ export const EMAIL_HISTORY_STAGES = {
   interviewFailed: 'Email Phỏng vấn - Gửi lỗi',
   employeeSent: 'Email Nhân sự - Đã gửi',
   employeeFailed: 'Email Nhân sự - Gửi lỗi',
-  interviewUnknown: 'Email Phỏng vấn - Chưa rõ kết quả',
-  employeeUnknown: 'Email Nhân sự - Chưa rõ kết quả',
 } as const;
 
 export const EMAIL_HISTORY_FIELD_IDS = {
@@ -33,7 +31,7 @@ export const EMAIL_HISTORY_FIELD_IDS = {
   providerMessageId: 'provider_message_id',
 } as const;
 
-export type EmailHistoryStatus = 'sent' | 'failed' | 'unknown';
+export type EmailHistoryStatus = 'sent' | 'failed';
 export type EmailHistoryFilter = EmailHistoryStatus | 'all' | 'templates';
 export type EmailSource = 'cv_scored' | 'lifecycle';
 export type EmailSourceFilter = EmailSource | 'all';
@@ -48,8 +46,6 @@ export interface EmailHistoryStageIds {
   interviewFailed: string;
   employeeSent: string;
   employeeFailed: string;
-  interviewUnknown?: string;
-  employeeUnknown?: string;
 }
 
 export interface StoredEmailPayload {
@@ -114,8 +110,6 @@ function getStatus(
   if (stageId === stages.interviewFailed) return { status: 'failed', source: 'cv_scored' };
   if (stageId === stages.employeeSent) return { status: 'sent', source: 'lifecycle' };
   if (stageId === stages.employeeFailed) return { status: 'failed', source: 'lifecycle' };
-  if (stageId === stages.interviewUnknown) return { status: 'unknown', source: 'cv_scored' };
-  if (stageId === stages.employeeUnknown) return { status: 'unknown', source: 'lifecycle' };
   return null;
 }
 
@@ -168,15 +162,11 @@ export function parseEmailHistoryItem(
   const provider = rawProvider === 'google' || rawProvider === 'microsoft' ? rawProvider : undefined;
 
   const lastError = asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.lastError));
-  const status = stageIdentity.status === 'failed' && lastError?.startsWith(MAIL_SEND_UNKNOWN_MARKER)
-    ? 'unknown'
-    : stageIdentity.status;
-
   return {
     id,
     listId,
     stageId,
-    status,
+    status: stageIdentity.status,
     source: stageIdentity.source,
     recipientName,
     recipientEmail,
@@ -244,7 +234,8 @@ export function filterEmailHistory(
 }
 
 export function canRetryEmail(record: EmailHistoryRecord): boolean {
-  return record.status === 'failed';
+  return record.status === 'failed'
+    && !record.lastError?.startsWith(MAIL_SEND_UNKNOWN_MARKER);
 }
 
 export function canDeleteEmail(record: EmailHistoryRecord): boolean {

@@ -74,7 +74,7 @@ export class MailConnectionService {
 
 	constructor(private readonly options: MailConnectionServiceOptions) {
 		this.now = options.now ?? Date.now;
-		this.uuid = options.uuid ?? crypto.randomUUID;
+		this.uuid = options.uuid ?? (() => crypto.randomUUID());
 		this.maxPendingCleanups = options.maxPendingCleanups ?? MAX_PENDING_CLEANUPS;
 	}
 
@@ -149,66 +149,34 @@ export class MailConnectionService {
 
 	async complete(actor: MailActor, attemptId: string, candidateConnectionId: string): Promise<ConnectionView> {
 		return this.options.lock.run(actor, async () => {
-			const key = namespace(actor);
-			const attempt = this.pendingAttempts.get(key);
-			if (!attempt || attempt.attemptId !== attemptId || attempt.actor.userId !== actor.userId) {
-				throw new MailError('MAIL_CONNECT_EXPIRED');
-			}
-			if (this.now() >= attempt.expiresAtMs) {
-				this.pendingAttempts.delete(key);
-				this.cleanupReservations.delete(key);
-				throw new MailError('MAIL_CONNECT_EXPIRED');
-			}
-
+			const attempt = this.requireAttempt(actor, attemptId);
 			const candidate = await this.options.broker.findConnection(
 				actor,
 				attempt.provider,
 				candidateConnectionId,
 				CONTROL_TIMEOUT_MS,
 			);
-			if (!candidate || candidate.authError || !tagsMatch(candidate, attempt)) {
-				throw new MailError('MAIL_RECONNECT_REQUIRED');
-			}
-			const senderEmail = await this.options.adapters[attempt.provider].identity(
-				candidateConnectionId,
+			return this.commitCandidate(actor, attempt, candidateConnectionId, candidate);
+		});
+	}
+
+	async poll(actor: MailActor, attemptId: string): Promise<ConnectionView | null> {
+		return this.options.lock.run(actor, async () => {
+			const attempt = this.requireAttempt(actor, attemptId);
+			const tags: ConnectionTags = {
+				installation_id: attempt.actor.installationId,
+				room_id: attempt.actor.roomId,
+				actor_id: attempt.actor.userId,
+				attempt_id: attempt.attemptId,
+			};
+			const candidate = await this.options.broker.findConnectionForAttempt(
+				actor,
+				attempt.provider,
+				tags,
 				CONTROL_TIMEOUT_MS,
 			);
-			if (this.now() >= attempt.expiresAtMs) {
-				this.pendingAttempts.delete(key);
-				this.cleanupReservations.delete(key);
-				throw new MailError('MAIL_CONNECT_EXPIRED');
-			}
-
-			const current = await this.options.repository.read(actor);
-			if (!sameRevision(current, attempt.expectedRevision)) throw new MailError('MAIL_CONNECTION_CHANGED');
-			const next: MailConnection = {
-				roomId: actor.roomId,
-				provider: attempt.provider,
-				connectionId: candidateConnectionId,
-				senderEmail,
-				status: 'connected',
-				revision: this.uuid(),
-				updatedBy: actor.userId,
-				updatedAt: new Date(this.now()).toISOString(),
-			};
-			const previous = current?.connectionId
-				&& current.status !== 'disconnected'
-				&& current.connectionId !== next.connectionId
-				? { provider: current.provider, connectionId: current.connectionId }
-				: null;
-			if (previous) this.reserveCleanup(actor, previous);
-			try {
-				await this.options.repository.write(actor, next);
-			} catch (error) {
-				if (previous) this.pendingCleanups.delete(key);
-				if (attempt.cleanupReserved) this.cleanupReservations.add(key);
-				throw error;
-			}
-			this.pendingAttempts.delete(key);
-			this.cleanupReservations.delete(key);
-
-			if (previous) await this.deleteOrRemember(actor, previous.provider, previous.connectionId);
-			return this.view(actor, next);
+			if (!candidate) return null;
+			return this.commitCandidate(actor, attempt, candidate.connectionId, candidate);
 		});
 	}
 
@@ -241,6 +209,72 @@ export class MailConnectionService {
 			await this.deleteOrRemember(actor, cleanup.provider, cleanup.connectionId);
 			return this.view(actor, disconnected);
 		});
+	}
+
+	private requireAttempt(actor: MailActor, attemptId: string): PendingAttempt {
+		const key = namespace(actor);
+		const attempt = this.pendingAttempts.get(key);
+		if (!attempt || attempt.attemptId !== attemptId || attempt.actor.userId !== actor.userId) {
+			throw new MailError('MAIL_CONNECT_EXPIRED');
+		}
+		if (this.now() >= attempt.expiresAtMs) {
+			this.pendingAttempts.delete(key);
+			this.cleanupReservations.delete(key);
+			throw new MailError('MAIL_CONNECT_EXPIRED');
+		}
+		return attempt;
+	}
+
+	private async commitCandidate(
+		actor: MailActor,
+		attempt: PendingAttempt,
+		candidateConnectionId: string,
+		candidate: BrokerConnection | null,
+	): Promise<ConnectionView> {
+		const key = namespace(actor);
+		if (!candidate || candidate.authError || !tagsMatch(candidate, attempt)) {
+			throw new MailError('MAIL_RECONNECT_REQUIRED');
+		}
+		const senderEmail = await this.options.adapters[attempt.provider].identity(
+			candidateConnectionId,
+			CONTROL_TIMEOUT_MS,
+		);
+		if (this.now() >= attempt.expiresAtMs) {
+			this.pendingAttempts.delete(key);
+			this.cleanupReservations.delete(key);
+			throw new MailError('MAIL_CONNECT_EXPIRED');
+		}
+
+		const current = await this.options.repository.read(actor);
+		if (!sameRevision(current, attempt.expectedRevision)) throw new MailError('MAIL_CONNECTION_CHANGED');
+		const next: MailConnection = {
+			roomId: actor.roomId,
+			provider: attempt.provider,
+			connectionId: candidateConnectionId,
+			senderEmail,
+			status: 'connected',
+			revision: this.uuid(),
+			updatedBy: actor.userId,
+			updatedAt: new Date(this.now()).toISOString(),
+		};
+		const previous = current?.connectionId
+			&& current.status !== 'disconnected'
+			&& current.connectionId !== next.connectionId
+			? { provider: current.provider, connectionId: current.connectionId }
+			: null;
+		if (previous) this.reserveCleanup(actor, previous);
+		try {
+			await this.options.repository.write(actor, next);
+		} catch (error) {
+			if (previous) this.pendingCleanups.delete(key);
+			if (attempt.cleanupReserved) this.cleanupReservations.add(key);
+			throw error;
+		}
+		this.pendingAttempts.delete(key);
+		this.cleanupReservations.delete(key);
+
+		if (previous) await this.deleteOrRemember(actor, previous.provider, previous.connectionId);
+		return this.view(actor, next);
 	}
 
 	private view(scope: MailScope, connection: MailConnection | null): ConnectionView {

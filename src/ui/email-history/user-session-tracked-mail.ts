@@ -112,10 +112,7 @@ export class UserSessionTrackedMail {
       receipt = parseMailReceipt(result.receipt);
     } catch (deliveryError) {
       try {
-        const status = deliveryError instanceof MailError && deliveryError.code === 'MAIL_SEND_UNKNOWN'
-          ? 'unknown'
-          : 'failed';
-        await this.history.createResult(request.roomId, payload, status, deliveryError);
+        await this.history.createResult(request.roomId, payload, 'failed', deliveryError);
       } catch {
         console.warn('[hrm.mail] send failed and its history row could not be written');
       }
@@ -153,11 +150,7 @@ export class UserSessionTrackedMail {
       })));
       receipt = parseMailReceipt(result.receipt);
     } catch (deliveryError) {
-      if (deliveryError instanceof MailError && deliveryError.code === 'MAIL_SEND_UNKNOWN') {
-        await this.history.markUnknown(roomId, record.id, deliveryError);
-      } else {
-        await this.history.markFailed(roomId, record.id, deliveryError);
-      }
+      await this.history.markFailed(roomId, record.id, deliveryError);
       throw deliveryError;
     }
 
@@ -167,9 +160,9 @@ export class UserSessionTrackedMail {
     } catch {
       console.warn('[hrm.mail] email delivered, history update failed');
       try {
-        await this.history.markUnknown(roomId, record.id, new MailError('MAIL_SEND_UNKNOWN'));
+        await this.history.markFailed(roomId, record.id, new MailError('MAIL_SEND_UNKNOWN'));
       } catch {
-        console.warn('[hrm.mail] accepted retry could not be marked unknown');
+        console.warn('[hrm.mail] accepted retry could not be locked against another retry');
       }
       return { logged: false, receipt };
     }

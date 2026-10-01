@@ -66,10 +66,12 @@ describe('EmailHistoryRepository', () => {
     expect(hub.calls[2][1]).toMatchObject({ listId: 'L1', stageId: 'st0', title: 'Hi' });
     expect(hub.calls[3][1]).toEqual({ itemId: 'I1', stageId: 'st0' });
     const createList = hub.calls.find(([name]) => name === 'mcpapp.lists.create')?.[1];
-    expect(createList?.stages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: EMAIL_HISTORY_STAGES.interviewUnknown }),
-      expect.objectContaining({ name: EMAIL_HISTORY_STAGES.employeeUnknown }),
-    ]));
+    expect((createList?.stages as Array<{ name: string }>).map(stage => stage.name)).toEqual([
+      EMAIL_HISTORY_STAGES.interviewSent,
+      EMAIL_HISTORY_STAGES.interviewFailed,
+      EMAIL_HISTORY_STAGES.employeeSent,
+      EMAIL_HISTORY_STAGES.employeeFailed,
+    ]);
   });
 
   it('stores provider receipt metadata on a sent row', async () => {
@@ -138,7 +140,7 @@ describe('EmailHistoryRepository', () => {
     expect(added).toEqual(['provider', 'sender_email', 'connection_revision', 'provider_message_id']);
   });
 
-  it('blocks an existing history list until both unknown outcome stages are migrated', async () => {
+  it('keeps sent history working on a legacy list that has only the four sent/failed stages', async () => {
     const hub = fakeHub(true);
     const call = async (name: string, args: Record<string, unknown> = {}) => {
       if (name === 'mcpapp.lists.getAll') {
@@ -152,10 +154,16 @@ describe('EmailHistoryRepository', () => {
       return hub.call(name, args);
     };
 
-    await expect(new EmailHistoryRepository(call).ensureStore('room-1')).rejects.toThrow(
-      'missing both Unknown outcome stages',
+    const record = await new EmailHistoryRepository(call).createResult(
+      'room-1',
+      payload,
+      'sent',
+      undefined,
+      'u1',
     );
-    expect(hub.calls.map(([name]) => name)).not.toContain('mcpapp.lists.createItem');
+
+    expect(record).toMatchObject({ id: 'I1', status: 'sent', stageId: 'st0' });
+    expect(hub.calls.map(([name]) => name)).toContain('mcpapp.lists.createItem');
   });
 
   it('getRecord fetches ONE item by id instead of scanning the list', async () => {

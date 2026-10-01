@@ -17,12 +17,26 @@ function result(value: unknown): unknown {
 }
 
 describe('MailConnectionClient', () => {
+	it('joins the installation agent bot to the current Room without a caller-supplied Room id', async () => {
+		const callServerTool = vi.fn(async () => result({ joined: true }));
+		const client = new MailConnectionClient({ callServerTool }, 'room-a');
+
+		await expect(client.joinCurrentRoom()).resolves.toBeUndefined();
+
+		expect(callServerTool).toHaveBeenCalledTimes(1);
+		expect(callServerTool).toHaveBeenCalledWith({
+			name: 'mcpapp.bot.joinCurrentRoom',
+			arguments: {},
+		});
+	});
+
 	it('binds every tool call to its Room and parses successful responses', async () => {
 		const callServerTool = vi.fn(async ({ name }: { name: string }) => {
 			if (name === 'hrm.mail.connection.begin') {
 				return result({
 					attemptId: 'attempt-a',
 					sessionToken: 'session-token',
+					connectLink: 'https://connect.nango.dev/?session_token=short-lived',
 					expiresAt: '2026-09-30T03:10:00.000Z',
 				});
 			}
@@ -33,9 +47,10 @@ describe('MailConnectionClient', () => {
 		await expect(client.get()).resolves.toEqual({ connection, cleanupPending: false });
 		await expect(client.begin('google', connection.revision)).resolves.toMatchObject({
 			attemptId: 'attempt-a',
-			sessionToken: 'session-token',
+			connectLink: 'https://connect.nango.dev/?session_token=short-lived',
 		});
 		await client.complete('attempt-a', 'candidate-a');
+		await expect(client.poll('attempt-a')).resolves.toEqual({ connection, cleanupPending: false });
 		await client.disconnect(connection.revision);
 
 		expect(callServerTool).toHaveBeenNthCalledWith(1, {
@@ -51,6 +66,10 @@ describe('MailConnectionClient', () => {
 			arguments: { roomId: 'room-a', attemptId: 'attempt-a', candidateConnectionId: 'candidate-a' },
 		});
 		expect(callServerTool).toHaveBeenNthCalledWith(4, {
+			name: 'hrm.mail.connection.complete',
+			arguments: { roomId: 'room-a', attemptId: 'attempt-a', candidateConnectionId: '__discover__' },
+		});
+		expect(callServerTool).toHaveBeenNthCalledWith(5, {
 			name: 'hrm.mail.connection.disconnect',
 			arguments: { roomId: 'room-a', expectedRevision: connection.revision },
 		});

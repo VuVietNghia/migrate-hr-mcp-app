@@ -1,9 +1,9 @@
-import Nango, { type ConnectUIEvent } from '@nangohq/frontend';
 import { useEffect, useMemo, useState } from 'react';
 
 import type { MailProvider } from '../../services/mail/mail-contracts';
 import { MailConnectionClient, type MailConnectionApp } from './mail-connection-client';
-import { MailConnectionController, type MailConnectEvent, type MailConnectLauncher, type MailConnectionState } from './mail-connection-controller';
+import { MailConnectionController, type MailConnectionState } from './mail-connection-controller';
+import { nangoPopupLauncher } from './nango-popup-launcher';
 import './mail-connection.css';
 
 export interface MailConnectionPanelProps {
@@ -11,35 +11,6 @@ export interface MailConnectionPanelProps {
 	roomId: string;
 	active: boolean;
 }
-
-function toControllerEvent(event: ConnectUIEvent): MailConnectEvent {
-	switch (event.type) {
-		case 'ready': return { type: 'ready' };
-		case 'close': return { type: 'close' };
-		case 'connect': return { type: 'connect', candidateConnectionId: event.payload.connectionId };
-		case 'error': return { type: 'error' };
-		case 'settings_changed': return { type: 'settings_changed' };
-		default: {
-			const exhaustive: never = event;
-			return exhaustive;
-		}
-	}
-}
-
-const nangoLauncher: MailConnectLauncher = {
-	open(onEvent) {
-		const sdk = new Nango();
-		const connectUi = sdk.openConnectUI({
-			detectClosedAuthWindow: true,
-			onEvent: event => onEvent(toControllerEvent(event)),
-		});
-		connectUi.open();
-		return {
-			setSessionToken: token => connectUi.setSessionToken(token),
-			close: () => connectUi.close(),
-		};
-	},
-};
 
 function providerName(provider: MailProvider): string {
 	switch (provider) {
@@ -54,7 +25,7 @@ function providerName(provider: MailProvider): string {
 
 export function MailConnectionPanel({ app, roomId, active }: MailConnectionPanelProps) {
 	const controller = useMemo(
-		() => new MailConnectionController(new MailConnectionClient(app, roomId), nangoLauncher),
+		() => new MailConnectionController(new MailConnectionClient(app, roomId), nangoPopupLauncher),
 		[app, roomId],
 	);
 	const [state, setState] = useState<MailConnectionState>(controller.state);

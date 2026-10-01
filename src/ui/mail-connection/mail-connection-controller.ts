@@ -1,9 +1,11 @@
 import type { BeginResult, ConnectionView, MailProvider } from '../../services/mail/mail-contracts';
 
 export interface MailConnectionClientApi {
+	joinCurrentRoom(): Promise<void>;
 	get(): Promise<ConnectionView>;
 	begin(provider: MailProvider, expectedRevision: string | null): Promise<BeginResult>;
 	complete(attemptId: string, candidateConnectionId: string): Promise<ConnectionView>;
+	poll(attemptId: string): Promise<ConnectionView | null>;
 	disconnect(expectedRevision: string): Promise<ConnectionView>;
 }
 
@@ -11,11 +13,12 @@ export type MailConnectEvent =
 	| { type: 'ready' }
 	| { type: 'close' }
 	| { type: 'connect'; candidateConnectionId: string }
+	| { type: 'poll' }
 	| { type: 'error' }
 	| { type: 'settings_changed' };
 
 export interface MailConnectHandle {
-	setSessionToken(sessionToken: string): void;
+	setConnectLink(connectLink: string): void;
 	close(): void;
 }
 
@@ -30,6 +33,8 @@ export type MailConnectionState =
 	| { kind: 'error'; view: ConnectionView | null; message: string };
 
 type StateListener = (state: MailConnectionState) => void;
+
+const EMPTY_CONNECTION_VIEW: ConnectionView = { connection: null, cleanupPending: false };
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error && error.message
@@ -68,24 +73,40 @@ export class MailConnectionController {
 	}
 
 	async connect(provider: MailProvider): Promise<void> {
-		const currentView = this.currentView();
-		if (!currentView) return;
+		let currentView = this.currentView();
+		const needsRoomJoin = currentView === null;
+		const previousError = this.state.kind === 'error' ? this.state.message : errorMessage(undefined);
 		const operation = ++this.generation;
 		let attempt: BeginResult | null = null;
 		let eventChain = Promise.resolve();
 		this.connectHandle?.close();
 		this.connectHandle = this.launcher.open(event => {
-			eventChain = eventChain.then(() => this.handleConnectEvent(event, operation, attempt, currentView));
+			eventChain = eventChain.then(() => this.handleConnectEvent(
+				event,
+				operation,
+				attempt,
+				currentView,
+				previousError,
+			));
 			return eventChain;
 		});
-		this.setState({ kind: 'connecting', view: currentView, provider });
+		this.setState({ kind: 'connecting', view: currentView ?? EMPTY_CONNECTION_VIEW, provider });
 		try {
+			if (needsRoomJoin) {
+				await this.client.joinCurrentRoom();
+				if (operation !== this.generation) return;
+				const recoveredView = await this.client.get();
+				if (operation !== this.generation) return;
+				currentView = recoveredView;
+				this.setState({ kind: 'connecting', view: recoveredView, provider });
+			}
+			if (!currentView) return;
 			attempt = await this.client.begin(provider, currentView.connection?.revision ?? null);
 			if (operation !== this.generation) {
 				this.connectHandle?.close();
 				return;
 			}
-			this.connectHandle.setSessionToken(attempt.sessionToken);
+			this.connectHandle.setConnectLink(attempt.connectLink);
 		} catch (error) {
 			if (operation !== this.generation) return;
 			this.connectHandle.close();
@@ -139,7 +160,8 @@ export class MailConnectionController {
 		event: MailConnectEvent,
 		operation: number,
 		attempt: BeginResult | null,
-		oldView: ConnectionView,
+		oldView: ConnectionView | null,
+		previousError: string,
 	): Promise<void> {
 		if (operation !== this.generation) return;
 		switch (event.type) {
@@ -149,7 +171,9 @@ export class MailConnectionController {
 			case 'close':
 				this.generation += 1;
 				this.connectHandle = null;
-				this.setState({ kind: 'ready', view: oldView });
+				this.setState(oldView
+					? { kind: 'ready', view: oldView }
+					: { kind: 'error', view: null, message: previousError });
 				return;
 			case 'error':
 				this.generation += 1;
@@ -157,37 +181,58 @@ export class MailConnectionController {
 				this.connectHandle = null;
 				this.setState({ kind: 'error', view: oldView, message: 'Không thể kết nối tài khoản email. Hãy thử lại.' });
 				return;
-			case 'connect':
-				if (!attempt) return;
+			case 'poll': {
+				if (!attempt || !oldView) return;
+				let completedView: ConnectionView | null;
+				try {
+					completedView = await this.client.poll(attempt.attemptId);
+				} catch (error) {
+					this.failConnection(operation, oldView, error);
+					return;
+				}
+				if (completedView) await this.commitConnection(operation, completedView);
+				return;
+			}
+			case 'connect': {
+				if (!attempt || !oldView) return;
 				let completedView: ConnectionView;
 				try {
 					completedView = await this.client.complete(attempt.attemptId, event.candidateConnectionId);
 				} catch (error) {
-					if (operation !== this.generation) return;
-					this.connectHandle?.close();
-					this.connectHandle = null;
-					this.setState({ kind: 'error', view: oldView, message: errorMessage(error) });
+					this.failConnection(operation, oldView, error);
 					return;
 				}
-				if (operation !== this.generation) return;
-				const committedOperation = ++this.generation;
-				this.connectHandle?.close();
-				this.connectHandle = null;
-				this.setState({ kind: 'ready', view: completedView });
-				try {
-					const refreshedView = await this.client.get();
-					if (committedOperation === this.generation) {
-						this.setState({ kind: 'ready', view: refreshedView });
-					}
-				} catch (error) {
-					if (committedOperation === this.generation) {
-						this.setState({ kind: 'error', view: completedView, message: errorMessage(error) });
-					}
-				}
+				await this.commitConnection(operation, completedView);
 				return;
+			}
 			default: {
 				const exhaustive: never = event;
 				return exhaustive;
+			}
+		}
+	}
+
+	private failConnection(operation: number, oldView: ConnectionView, error: unknown): void {
+		if (operation !== this.generation) return;
+		this.connectHandle?.close();
+		this.connectHandle = null;
+		this.setState({ kind: 'error', view: oldView, message: errorMessage(error) });
+	}
+
+	private async commitConnection(operation: number, completedView: ConnectionView): Promise<void> {
+		if (operation !== this.generation) return;
+		const committedOperation = ++this.generation;
+		this.connectHandle?.close();
+		this.connectHandle = null;
+		this.setState({ kind: 'ready', view: completedView });
+		try {
+			const refreshedView = await this.client.get();
+			if (committedOperation === this.generation) {
+				this.setState({ kind: 'ready', view: refreshedView });
+			}
+		} catch (error) {
+			if (committedOperation === this.generation) {
+				this.setState({ kind: 'error', view: completedView, message: errorMessage(error) });
 			}
 		}
 	}

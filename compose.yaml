@@ -7,7 +7,7 @@ services:
       PORT: "3000"
       PRIVOS_STANDALONE_IDENTITY_FILE: /run/privos/identity/privos-standalone-identity.json
     volumes:
-      - ./docker-data/identity:/run/privos/identity
+      - privos_identity:/run/privos/identity
     secrets:
       - nango_api_key
     ports:
@@ -21,6 +21,11 @@ services:
       - no-new-privileges:true
     pids_limit: 100
     restart: unless-stopped
+
+volumes:
+  privos_identity:
+    name: privos_hr_identity
+    external: true
 
 secrets:
   nango_api_key:

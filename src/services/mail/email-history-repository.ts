@@ -48,8 +48,6 @@ const STAGE_DEFINITIONS = [
   { name: EMAIL_HISTORY_STAGES.interviewFailed, color: '#dc2626' },
   { name: EMAIL_HISTORY_STAGES.employeeSent, color: '#16a34a' },
   { name: EMAIL_HISTORY_STAGES.employeeFailed, color: '#dc2626' },
-  { name: EMAIL_HISTORY_STAGES.interviewUnknown, color: '#d97706' },
-  { name: EMAIL_HISTORY_STAGES.employeeUnknown, color: '#d97706' },
 ];
 
 const RECEIPT_FIELD_IDS = new Set<string>([
@@ -91,16 +89,12 @@ function resolveStageIds(stages: unknown): EmailHistoryStageIds | null {
   const interviewFailed = idsByName.get(EMAIL_HISTORY_STAGES.interviewFailed);
   const employeeSent = idsByName.get(EMAIL_HISTORY_STAGES.employeeSent);
   const employeeFailed = idsByName.get(EMAIL_HISTORY_STAGES.employeeFailed);
-  const interviewUnknown = idsByName.get(EMAIL_HISTORY_STAGES.interviewUnknown);
-  const employeeUnknown = idsByName.get(EMAIL_HISTORY_STAGES.employeeUnknown);
   return interviewSent && interviewFailed && employeeSent && employeeFailed
     ? {
         interviewSent,
         interviewFailed,
         employeeSent,
         employeeFailed,
-        ...(interviewUnknown ? { interviewUnknown } : {}),
-        ...(employeeUnknown ? { employeeUnknown } : {}),
       }
     : null;
 }
@@ -111,22 +105,22 @@ function getStageId(
   status: EmailHistoryRecord['status'],
 ): string {
   if (source === 'cv_scored') {
-    if (status === 'sent') return stages.interviewSent;
-    if (status === 'failed') return stages.interviewFailed;
-    if (stages.interviewUnknown) return stages.interviewUnknown;
-    throw new Error('List lịch sử email chưa có stage Chưa rõ kết quả cho email phỏng vấn.');
+    return status === 'sent' ? stages.interviewSent : stages.interviewFailed;
   }
-  if (status === 'sent') return stages.employeeSent;
-  if (status === 'failed') return stages.employeeFailed;
-  if (stages.employeeUnknown) return stages.employeeUnknown;
-  throw new Error('List lịch sử email chưa có stage Chưa rõ kết quả cho email nhân sự.');
+  return status === 'sent' ? stages.employeeSent : stages.employeeFailed;
 }
 
 function normalizeError(error: unknown): string {
+  const code = error && typeof error === 'object'
+    ? (error as { code?: unknown }).code
+    : undefined;
   const message = error instanceof Error ? error.message : String(error);
-  return message
+  const normalized = message
     .replace(/(accessToken|privateKey|authorization)\s*[=:]\s*[^\s,;]+/gi, '$1=[REDACTED]')
     .slice(0, 1000);
+  return code === 'MAIL_SEND_UNKNOWN' && !normalized.startsWith(MAIL_SEND_UNKNOWN_MARKER)
+    ? `${MAIL_SEND_UNKNOWN_MARKER} ${normalized}`
+    : normalized;
 }
 
 function recordToCustomFields(record: EmailHistoryRecord, recordId: string) {
@@ -262,21 +256,6 @@ export class EmailHistoryRepository {
     });
   }
 
-  async markUnknown(roomId: string, itemId: string, error: unknown): Promise<EmailHistoryRecord> {
-    const store = await this.ensureStore(roomId);
-    const current = await this.getRecord(roomId, itemId);
-    return this.updateRecord({
-      ...current,
-      stageId: current.source === 'cv_scored'
-        ? store.stageIds.interviewUnknown ?? current.stageId
-        : store.stageIds.employeeUnknown ?? current.stageId,
-      status: 'unknown',
-      updatedAt: this.now(),
-      attemptCount: current.attemptCount + 1,
-      lastError: `${MAIL_SEND_UNKNOWN_MARKER} ${normalizeError(error)}`,
-    });
-  }
-
   async markFailed(roomId: string, itemId: string, error: unknown): Promise<EmailHistoryRecord> {
     const store = await this.ensureStore(roomId);
     const current = await this.getRecord(roomId, itemId);
@@ -325,9 +304,6 @@ export class EmailHistoryRepository {
       }
       const stageIds = resolveStageIds(stages);
       if (!listId || !stageIds) throw new Error('List lịch sử email thiếu cấu hình stage bắt buộc.');
-      if (!stageIds.interviewUnknown || !stageIds.employeeUnknown) {
-        throw new Error('Existing email history list is missing both Unknown outcome stages; migrate it before release.');
-      }
       await this.ensureReceiptFields(listId, existing);
       return { listId, stageIds };
     }

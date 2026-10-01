@@ -16,7 +16,11 @@ const tags = {
 function createGateway(overrides: Partial<NangoSdkClient> = {}) {
 	const created: Array<{ apiKey: string; timeoutMs: number }> = [];
 	const client: NangoSdkClient = {
-		createConnectSession: async () => ({ data: { token: 'session-token', expires_at: '2026-09-30T02:00:00Z' } }),
+		createConnectSession: async () => ({ data: {
+			token: 'session-token',
+			connect_link: 'https://connect.nango.dev/?session_token=short-lived',
+			expires_at: '2026-09-30T02:00:00Z',
+		} }),
 		listConnections: async () => ({ connections: [] }),
 		proxy: async () => ({ status: 200, data: {} }),
 		deleteConnection: async () => undefined,
@@ -38,12 +42,17 @@ describe('NangoSdkGateway', () => {
 		const { gateway } = createGateway({
 			createConnectSession: async value => {
 				body = value;
-				return { data: { token: 'session-token', expires_at: '2026-09-30T02:00:00Z' } };
+				return { data: {
+					token: 'session-token',
+					connect_link: 'https://connect.nango.dev/?session_token=short-lived',
+					expires_at: '2026-09-30T02:00:00Z',
+				} };
 			},
 		});
 
 		await expect(gateway.createSession('google', tags)).resolves.toEqual({
 			sessionToken: 'session-token',
+			connectLink: 'https://connect.nango.dev/?session_token=short-lived',
 			expiresAt: '2026-09-30T02:00:00Z',
 		});
 		expect(body).toEqual({
@@ -51,6 +60,29 @@ describe('NangoSdkGateway', () => {
 			end_user: { id: 'user-a' },
 			tags,
 		});
+	});
+
+	it('discovers exactly one completed connection using all attempt tags', async () => {
+		let params: unknown;
+		const { gateway } = createGateway({
+			listConnections: async value => {
+				params = value;
+				return { connections: [{
+					connection_id: 'connection-a',
+					provider_config_key: 'hr-google-mail',
+					tags,
+					errors: [],
+				}] };
+			},
+		});
+
+		await expect(gateway.findConnectionForAttempt(
+			{ installationId: 'installation-a', roomId: 'room-a' },
+			'google',
+			tags,
+			8000,
+		)).resolves.toMatchObject({ connectionId: 'connection-a', tags });
+		expect(params).toEqual({ integrationId: 'hr-google-mail', tags, limit: 2 });
 	});
 
 	it('lists only exact connection, integration and namespace metadata with limit two', async () => {

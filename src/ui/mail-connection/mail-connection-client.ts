@@ -2,6 +2,7 @@ import type { McpApp } from '@privos_ai/app-react';
 import { z } from 'zod';
 
 import {
+	MAIL_CONNECTION_DISCOVERY_SENTINEL,
 	parseMailConnectionSummary,
 	type BeginResult,
 	type ConnectionView,
@@ -14,6 +15,7 @@ export type MailConnectionApp = Pick<McpApp, 'callServerTool'>;
 const beginResultSchema = z.object({
 	attemptId: z.string().min(1).max(128),
 	sessionToken: z.string().min(1),
+	connectLink: z.url().refine(link => new URL(link).origin === 'https://connect.nango.dev'),
 	expiresAt: z.iso.datetime({ offset: true }),
 }).strict();
 
@@ -41,6 +43,11 @@ export class MailConnectionClient {
 		private readonly roomId: string,
 	) {}
 
+	/** Interactive call covered by the Room-scoped `bot:room:join` permission. */
+	async joinCurrentRoom(): Promise<void> {
+		await this.call('mcpapp.bot.joinCurrentRoom', {});
+	}
+
 	async get(): Promise<ConnectionView> {
 		return this.callView('hrm.mail.connection.get', { roomId: this.roomId });
 	}
@@ -60,6 +67,15 @@ export class MailConnectionClient {
 			attemptId,
 			candidateConnectionId,
 		});
+	}
+
+	async poll(attemptId: string): Promise<ConnectionView | null> {
+		const raw = await this.call('hrm.mail.connection.complete', {
+			roomId: this.roomId,
+			attemptId,
+			candidateConnectionId: MAIL_CONNECTION_DISCOVERY_SENTINEL,
+		});
+		return raw === null ? null : parseConnectionView(raw, this.roomId);
 	}
 
 	async disconnect(expectedRevision: string): Promise<ConnectionView> {

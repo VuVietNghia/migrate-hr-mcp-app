@@ -35,7 +35,7 @@ class FakeLauncher implements MailConnectLauncher {
 	constructor() {
 		let listener: (event: MailConnectEvent) => Promise<void> = async () => undefined;
 		this.handle = {
-			setSessionToken: vi.fn(),
+			setConnectLink: vi.fn(),
 			close: vi.fn(),
 			emit: event => listener(event),
 		};
@@ -57,19 +57,89 @@ function deferred<T>() {
 
 function client(overrides: Partial<MailConnectionClientApi> = {}): MailConnectionClientApi {
 	return {
+		joinCurrentRoom: vi.fn(async () => undefined),
 		get: vi.fn(async () => oldView),
 		begin: vi.fn(async (_provider: MailProvider, _revision: string | null): Promise<BeginResult> => ({
 			attemptId: 'attempt-a',
 			sessionToken: 'token-a',
+			connectLink: 'https://connect.nango.dev/?session_token=short-lived',
 			expiresAt: '2026-09-30T03:10:00.000Z',
 		})),
 		complete: vi.fn(async () => newView),
+		poll: vi.fn(async () => null),
 		disconnect: vi.fn(async () => ({ connection: null, cleanupPending: false })),
 		...overrides,
 	};
 }
 
 describe('MailConnectionController', () => {
+	it('joins the bot, reloads the empty Room view, and begins OAuth after the initial load failed', async () => {
+		const pendingJoin = deferred<void>();
+		const emptyView: ConnectionView = { connection: null, cleanupPending: false };
+		const get = vi.fn<() => Promise<ConnectionView>>()
+			.mockRejectedValueOnce(new Error('configuration unavailable'))
+			.mockResolvedValueOnce(emptyView);
+		const api = client({
+			get,
+			joinCurrentRoom: vi.fn(() => pendingJoin.promise),
+		});
+		const launcher = new FakeLauncher();
+		const controller = new MailConnectionController(api, launcher);
+		await controller.load();
+
+		const connecting = controller.connect('google');
+		expect(launcher.openCalls).toBe(1);
+		expect(api.joinCurrentRoom).toHaveBeenCalledTimes(1);
+		expect(api.begin).not.toHaveBeenCalled();
+
+		pendingJoin.resolve();
+		await connecting;
+
+		expect(api.get).toHaveBeenCalledTimes(2);
+		expect(api.begin).toHaveBeenCalledWith('google', null);
+		expect(launcher.handle.setConnectLink).toHaveBeenCalledWith('https://connect.nango.dev/?session_token=short-lived');
+		expect(controller.state).toEqual({ kind: 'connecting', view: emptyView, provider: 'google' });
+	});
+
+	it('closes Connect UI and keeps a retryable view-less error when joining the Room fails', async () => {
+		const api = client({
+			get: vi.fn(async () => { throw new Error('configuration unavailable'); }),
+			joinCurrentRoom: vi.fn(async () => { throw new Error('join failed'); }),
+		});
+		const launcher = new FakeLauncher();
+		const controller = new MailConnectionController(api, launcher);
+		await controller.load();
+
+		await controller.connect('google');
+
+		expect(launcher.handle.close).toHaveBeenCalled();
+		expect(api.begin).not.toHaveBeenCalled();
+		expect(controller.state).toEqual({ kind: 'error', view: null, message: 'join failed' });
+	});
+
+	it('does not continue recovery after the controller is disposed during the Room join', async () => {
+		const pendingJoin = deferred<void>();
+		const get = vi.fn<() => Promise<ConnectionView>>()
+			.mockRejectedValueOnce(new Error('configuration unavailable'))
+			.mockResolvedValueOnce({ connection: null, cleanupPending: false });
+		const api = client({
+			get,
+			joinCurrentRoom: vi.fn(() => pendingJoin.promise),
+		});
+		const launcher = new FakeLauncher();
+		const controller = new MailConnectionController(api, launcher);
+		await controller.load();
+
+		const connecting = controller.connect('google');
+		controller.dispose();
+		pendingJoin.resolve();
+		await connecting;
+
+		expect(get).toHaveBeenCalledTimes(1);
+		expect(api.begin).not.toHaveBeenCalled();
+		expect(launcher.handle.close).toHaveBeenCalled();
+	});
+
 	it('opens Connect UI before awaiting begin and completes the candidate', async () => {
 		const pendingBegin = deferred<BeginResult>();
 		const get = vi.fn<() => Promise<ConnectionView>>()
@@ -82,16 +152,38 @@ describe('MailConnectionController', () => {
 
 		const connecting = controller.connect('google');
 		expect(launcher.openCalls).toBe(1);
+		expect(api.joinCurrentRoom).not.toHaveBeenCalled();
 		expect(api.begin).toHaveBeenCalledWith('google', roomAConnection.revision);
 		pendingBegin.resolve({
-			attemptId: 'attempt-a', sessionToken: 'token-a', expiresAt: '2026-09-30T03:10:00.000Z',
+			attemptId: 'attempt-a',
+			sessionToken: 'token-a',
+			connectLink: 'https://connect.nango.dev/?session_token=short-lived',
+			expiresAt: '2026-09-30T03:10:00.000Z',
 		});
 		await connecting;
-		expect(launcher.handle.setSessionToken).toHaveBeenCalledWith('token-a');
+		expect(launcher.handle.setConnectLink).toHaveBeenCalledWith('https://connect.nango.dev/?session_token=short-lived');
 
 		await launcher.handle.emit({ type: 'connect', candidateConnectionId: 'candidate-a' });
 		expect(api.complete).toHaveBeenCalledWith('attempt-a', 'candidate-a');
 		expect(api.get).toHaveBeenCalledTimes(2);
+		expect(controller.state).toEqual({ kind: 'ready', view: newView });
+	});
+
+	it('commits a connection discovered while the external Nango tab is open', async () => {
+		const get = vi.fn<() => Promise<ConnectionView>>()
+			.mockResolvedValueOnce(oldView)
+			.mockResolvedValue(newView);
+		const api = client({ get, poll: vi.fn(async () => newView) });
+		const launcher = new FakeLauncher();
+		const controller = new MailConnectionController(api, launcher);
+		await controller.load();
+		await controller.connect('google');
+
+		await launcher.handle.emit({ type: 'poll' });
+
+		expect(api.poll).toHaveBeenCalledWith('attempt-a');
+		expect(api.complete).not.toHaveBeenCalled();
+		expect(launcher.handle.close).toHaveBeenCalled();
 		expect(controller.state).toEqual({ kind: 'ready', view: newView });
 	});
 

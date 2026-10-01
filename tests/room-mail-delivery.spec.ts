@@ -65,6 +65,10 @@ class Broker implements NangoGateway {
 		};
 	}
 
+	async findConnectionForAttempt(): Promise<null> {
+		return null;
+	}
+
 	async proxy(_request: ProxyRequest): Promise<ProxyResponse> {
 		throw new Error('unused');
 	}

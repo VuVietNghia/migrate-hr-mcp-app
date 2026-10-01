@@ -129,6 +129,20 @@ describe('built UI shell with inlined assets', () => {
     });
     expect(viaToolsCall.content[0].resource.text).toBe(viaResourcesRead.contents[0].text);
   });
+
+  it('attaches the standard MCP Apps frameDomains CSP to every UI resource response', async () => {
+    const viaResourcesRead = await handleMcpMessage('resources/read', 8, { uri: UI_RESOURCE_URI });
+    const viaToolsCall = await handleMcpMessage('tools/call', 9, {
+      name: 'hr_management_dashboard',
+      arguments: {},
+    });
+    const expectedCsp = {
+      frameDomains: ['https://www.youtube.com', 'https://connect.nango.dev'],
+    };
+
+    expect(viaResourcesRead.contents[0]._meta?.ui?.csp).toEqual(expectedCsp);
+    expect(viaToolsCall.content[0].resource._meta?.ui?.csp).toEqual(expectedCsp);
+  });
 });
 
 describe('lazy panel error boundary — Reload fallback', () => {

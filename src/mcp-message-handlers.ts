@@ -61,6 +61,31 @@ const UI_DECLARED_CSP: Record<string, string[]> | undefined = (pkg.tools as any[
 	(tool) => tool?.ui?.resourceUri === UI_RESOURCE_URI,
 )?.ui?.csp;
 
+/**
+ * The publisher manifest uses PrivOS's directive-style CSP keys, while the MCP Apps wire
+ * protocol names nested-frame origins `frameDomains`. Preserve the reviewed allowlist and
+ * translate only its shape before advertising or returning a UI resource.
+ */
+const UI_RESOURCE_CSP: Record<string, string[]> | undefined = UI_DECLARED_CSP
+	? {
+			...(UI_DECLARED_CSP.connectDomains && { connectDomains: UI_DECLARED_CSP.connectDomains }),
+			...(UI_DECLARED_CSP.resourceDomains && { resourceDomains: UI_DECLARED_CSP.resourceDomains }),
+			...(UI_DECLARED_CSP.baseUriDomains && { baseUriDomains: UI_DECLARED_CSP.baseUriDomains }),
+			...((UI_DECLARED_CSP.frameDomains || UI_DECLARED_CSP['frame-src']) && {
+				frameDomains: UI_DECLARED_CSP.frameDomains || UI_DECLARED_CSP['frame-src'],
+			}),
+		}
+	: undefined;
+
+function currentUiResource(uri: string = UI_RESOURCE_URI) {
+	return {
+		uri,
+		mimeType: 'text/html;profile=mcp-app',
+		text: currentShellHtml(),
+		...(UI_RESOURCE_CSP && { _meta: { ui: { csp: UI_RESOURCE_CSP } } }),
+	};
+}
+
 const appIcon = getAppIconDataUri();
 
 const DIST_UI_DIR = path.join(moduleDir, '../dist/ui');
@@ -248,7 +273,7 @@ export async function handleMcpMessage(
 							// The CSP block declares the external origins this app's UI would like to
 							// embed. It grants nothing: a workspace admin approves what may actually
 							// load, and the Hub enforces that approval on the served document.
-							ui: { resourceUri: UI_RESOURCE_URI, csp: UI_DECLARED_CSP },
+							ui: { resourceUri: UI_RESOURCE_URI, csp: UI_RESOURCE_CSP },
 						},
 					},
 					{
@@ -316,11 +341,7 @@ export async function handleMcpMessage(
 				content: [
 					{
 						type: 'resource',
-						resource: {
-							uri: UI_RESOURCE_URI,
-							mimeType: 'text/html;profile=mcp-app',
-							text: currentShellHtml(),
-						},
+						resource: currentUiResource(),
 					},
 				],
 			};
@@ -348,18 +369,12 @@ export async function handleMcpMessage(
 function handleResourcesRead(uri: unknown): { contents: unknown[] } {
 	if (devPublicUrl) {
 		return {
-			contents: [
-				{
-					uri: typeof uri === 'string' ? uri : UI_RESOURCE_URI,
-					mimeType: 'text/html;profile=mcp-app',
-					text: currentShellHtml(),
-				},
-			],
+			contents: [currentUiResource(typeof uri === 'string' ? uri : UI_RESOURCE_URI)],
 		};
 	}
 
 	if (uri === UI_RESOURCE_URI) {
-		return { contents: [{ uri: UI_RESOURCE_URI, mimeType: 'text/html;profile=mcp-app', text: currentShellHtml() }] };
+		return { contents: [currentUiResource()] };
 	}
 
 	throw Object.assign(new Error(`Unknown resource: ${typeof uri === 'string' ? uri : '<missing>'}`), {

@@ -23,17 +23,33 @@ describe('hrm.mail.connection.* tools', () => {
 	const begin = vi.fn(async () => ({
 		attemptId: 'attempt-a',
 		sessionToken: 'session-token',
+		connectLink: 'https://connect.nango.dev/?session_token=short-lived',
 		expiresAt: '2026-09-30T01:10:00.000Z',
 	}));
 	const complete = vi.fn(async () => ({ connection: null, cleanupPending: false }));
+	const poll = vi.fn(async () => null);
 	const disconnect = vi.fn(async () => ({ connection: null, cleanupPending: false }));
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 		setMailConnectionToolDependencies({
-			getService: () => ({ get, begin, complete, disconnect }),
+			getService: () => ({ get, begin, complete, poll, disconnect }),
 			resolveInstallationId: async () => 'installation-a',
 		});
+	});
+
+	it('uses the existing complete tool as a tag-bound discovery poll without changing its manifest schema', async () => {
+		const result = parse(await handleMailConnectionTool(
+			'hrm.mail.connection.complete',
+			{ roomId: 'room-a', attemptId: 'attempt-a', candidateConnectionId: '__discover__' },
+			actor,
+		));
+		expect(result.isError).not.toBe(true);
+		expect(poll).toHaveBeenCalledWith(
+			{ installationId: 'installation-a', roomId: 'room-a', userId: 'user-a' },
+			'attempt-a',
+		);
+		expect(complete).not.toHaveBeenCalled();
 	});
 
 	it('allows a non-owner Room member to begin a provider-restricted connection', async () => {

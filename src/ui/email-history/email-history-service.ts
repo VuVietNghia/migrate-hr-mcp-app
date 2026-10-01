@@ -51,16 +51,12 @@ function resolveStageIds(stages: unknown): EmailHistoryStageIds | null {
   const interviewFailed = ids.get(EMAIL_HISTORY_STAGES.interviewFailed);
   const employeeSent = ids.get(EMAIL_HISTORY_STAGES.employeeSent);
   const employeeFailed = ids.get(EMAIL_HISTORY_STAGES.employeeFailed);
-  const interviewUnknown = ids.get(EMAIL_HISTORY_STAGES.interviewUnknown);
-  const employeeUnknown = ids.get(EMAIL_HISTORY_STAGES.employeeUnknown);
   return interviewSent && interviewFailed && employeeSent && employeeFailed
     ? {
         interviewSent,
         interviewFailed,
         employeeSent,
         employeeFailed,
-        ...(interviewUnknown ? { interviewUnknown } : {}),
-        ...(employeeUnknown ? { employeeUnknown } : {}),
       }
     : null;
 }

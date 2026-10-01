@@ -36,6 +36,10 @@ class FakeGateway implements NangoGateway {
 		return null;
 	}
 
+	async findConnectionForAttempt(): Promise<null> {
+		return null;
+	}
+
 	async proxy(request: ProxyRequest): Promise<ProxyResponse> {
 		this.requests.push(request);
 		return this.respond(request);
