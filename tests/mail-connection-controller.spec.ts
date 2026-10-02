@@ -73,7 +73,52 @@ function client(overrides: Partial<MailConnectionClientApi> = {}): MailConnectio
 }
 
 describe('MailConnectionController', () => {
-	it('joins the bot, reloads the empty Room view, and begins OAuth after the initial load failed', async () => {
+	it('joins the installation bot before loading the current Room mailbox', async () => {
+		const pendingJoin = deferred<void>();
+		const get = vi.fn(async () => oldView);
+		const api = client({
+			get,
+			joinCurrentRoom: vi.fn(() => pendingJoin.promise),
+		});
+		const controller = new MailConnectionController(api, new FakeLauncher());
+
+		const loading = controller.load();
+
+		expect(api.joinCurrentRoom).toHaveBeenCalledTimes(1);
+		expect(get).not.toHaveBeenCalled();
+
+		pendingJoin.resolve();
+		await loading;
+
+		expect(get).toHaveBeenCalledTimes(1);
+		expect(controller.state).toEqual({ kind: 'ready', view: oldView });
+	});
+
+	it('keeps the connected mailbox and does not repeat the Room join when a refresh is denied', async () => {
+		const get = vi.fn<() => Promise<ConnectionView>>()
+			.mockResolvedValueOnce(oldView)
+			.mockRejectedValueOnce(new Error('MCP_ROOM_SCOPE_DENIED'));
+		const api = client({
+			get,
+			joinCurrentRoom: vi.fn<() => Promise<void>>()
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error('MCP_ROOM_SCOPE_DENIED')),
+		});
+		const controller = new MailConnectionController(api, new FakeLauncher());
+
+		await controller.load();
+		await controller.load();
+
+		expect(api.joinCurrentRoom).toHaveBeenCalledTimes(1);
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(controller.state).toEqual({
+			kind: 'error',
+			view: oldView,
+			message: 'MCP_ROOM_SCOPE_DENIED',
+		});
+	});
+
+	it('retries the bot join, reloads the empty Room view, and begins OAuth after the initial load failed', async () => {
 		const pendingJoin = deferred<void>();
 		const emptyView: ConnectionView = { connection: null, cleanupPending: false };
 		const get = vi.fn<() => Promise<ConnectionView>>()
@@ -81,7 +126,9 @@ describe('MailConnectionController', () => {
 			.mockResolvedValueOnce(emptyView);
 		const api = client({
 			get,
-			joinCurrentRoom: vi.fn(() => pendingJoin.promise),
+			joinCurrentRoom: vi.fn<() => Promise<void>>()
+				.mockResolvedValueOnce(undefined)
+				.mockImplementationOnce(() => pendingJoin.promise),
 		});
 		const launcher = new FakeLauncher();
 		const controller = new MailConnectionController(api, launcher);
@@ -89,7 +136,7 @@ describe('MailConnectionController', () => {
 
 		const connecting = controller.connect('google');
 		expect(launcher.openCalls).toBe(1);
-		expect(api.joinCurrentRoom).toHaveBeenCalledTimes(1);
+		expect(api.joinCurrentRoom).toHaveBeenCalledTimes(2);
 		expect(api.begin).not.toHaveBeenCalled();
 
 		pendingJoin.resolve();
@@ -117,27 +164,22 @@ describe('MailConnectionController', () => {
 		expect(controller.state).toEqual({ kind: 'error', view: null, message: 'join failed' });
 	});
 
-	it('does not continue recovery after the controller is disposed during the Room join', async () => {
+	it('does not load the mailbox after the controller is disposed during the automatic Room join', async () => {
 		const pendingJoin = deferred<void>();
-		const get = vi.fn<() => Promise<ConnectionView>>()
-			.mockRejectedValueOnce(new Error('configuration unavailable'))
-			.mockResolvedValueOnce({ connection: null, cleanupPending: false });
+		const get = vi.fn(async () => oldView);
 		const api = client({
 			get,
 			joinCurrentRoom: vi.fn(() => pendingJoin.promise),
 		});
-		const launcher = new FakeLauncher();
-		const controller = new MailConnectionController(api, launcher);
-		await controller.load();
+		const controller = new MailConnectionController(api, new FakeLauncher());
 
-		const connecting = controller.connect('google');
+		const loading = controller.load();
 		controller.dispose();
 		pendingJoin.resolve();
-		await connecting;
+		await loading;
 
-		expect(get).toHaveBeenCalledTimes(1);
+		expect(get).not.toHaveBeenCalled();
 		expect(api.begin).not.toHaveBeenCalled();
-		expect(launcher.handle.close).toHaveBeenCalled();
 	});
 
 	it('opens Connect UI before awaiting begin and completes the candidate', async () => {
@@ -152,7 +194,7 @@ describe('MailConnectionController', () => {
 
 		const connecting = controller.connect('google');
 		expect(launcher.openCalls).toBe(1);
-		expect(api.joinCurrentRoom).not.toHaveBeenCalled();
+		expect(api.joinCurrentRoom).toHaveBeenCalledTimes(1);
 		expect(api.begin).toHaveBeenCalledWith('google', roomAConnection.revision);
 		pendingBegin.resolve({
 			attemptId: 'attempt-a',

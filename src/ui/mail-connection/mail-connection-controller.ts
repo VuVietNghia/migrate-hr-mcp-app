@@ -62,13 +62,20 @@ export class MailConnectionController {
 	}
 
 	async load(): Promise<void> {
+		const previousView = this.currentView();
 		const operation = ++this.generation;
 		this.setState({ kind: 'loading' });
 		try {
+			if (!previousView) {
+				await this.client.joinCurrentRoom();
+				if (operation !== this.generation) return;
+			}
 			const view = await this.client.get();
 			if (operation === this.generation) this.setState({ kind: 'ready', view });
 		} catch (error) {
-			if (operation === this.generation) this.setState({ kind: 'error', view: null, message: errorMessage(error) });
+			if (operation === this.generation) {
+				this.setState({ kind: 'error', view: previousView, message: errorMessage(error) });
+			}
 		}
 	}
 
