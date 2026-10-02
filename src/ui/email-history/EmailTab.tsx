@@ -16,6 +16,7 @@ import {
   createInterviewEmailTemplateRepository,
 } from '../email-templates/interview-email-template-default';
 import type { EmailTemplateCategory } from '../email-templates/interview-email-template-state';
+import { MailConnectionPanel } from '../mail-connection/MailConnectionPanel';
 import './email-tab.css';
 
 const ZERO_COUNTS: ByTemplateCategory<number> = { cv_scored: 0, lifecycle: 0 };
@@ -157,7 +158,9 @@ export default function EmailTab({ active }: EmailTabProps) {
   };
 
   return (
-    <EmailMailboxView
+    <>
+      {app && roomId && <MailConnectionPanel key={roomId} app={app} roomId={roomId} active={active} />}
+      <EmailMailboxView
       records={records}
       selectedId={selectedId}
       filter={filter}
@@ -191,6 +194,7 @@ export default function EmailTab({ active }: EmailTabProps) {
       onRequestDelete={setDeleteCandidate}
       onCancelDelete={() => setDeleteCandidate(null)}
       onConfirmDelete={() => { void handleConfirmDelete(); }}
-    />
+      />
+    </>
   );
 }

@@ -654,6 +654,8 @@ export function EmailMailboxView({
               {selected.jdName && <div><dt>JD</dt><dd>{selected.jdName}</dd></div>}
               <div><dt>Số lần gửi</dt><dd>{selected.attemptCount}</dd></div>
               <div><dt>Cập nhật</dt><dd>{formatTimestamp(selected.updatedAt)}</dd></div>
+              {selected.senderEmail && <div><dt>Mailbox gửi</dt><dd>{selected.senderEmail}</dd></div>}
+              {selected.provider && <div><dt>Nhà cung cấp</dt><dd>{selected.provider === 'google' ? 'Google' : 'Microsoft'}</dd></div>}
             </dl>
 
             {selected.lastError && (

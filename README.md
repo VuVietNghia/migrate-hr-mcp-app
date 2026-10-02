@@ -263,9 +263,9 @@ features fail at runtime:
    verifies the bot's membership whenever a `roomId` is passed.
 3. **Paired in dev.** Run `npm run dev` and paste the pairing URL once so `.env` carries
    `MCP_APP_ID` — `resolveOwnMcpAppId()` needs it before any mediated tool call can be made.
-4. **EmailJS non-browser access.** The EmailJS account must have *Allow EmailJS API for non-browser
-   applications* enabled; the server relay authenticates with the private key as `accessToken`.
-   Set `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID`, `EMAILJS_PUBLIC_KEY` and `EMAILJS_PRIVATE_KEY`.
+4. **Room mailbox OAuth.** Configure the Google Workspace and Microsoft 365 integrations in Nango,
+   then mount the Nango API key at `/run/secrets/nango_api_key`. A verified Room member connects the
+   shared mailbox from Email; provider credentials are never stored in PrivOS App Database.
 
 ## License behavior
 
@@ -346,10 +346,9 @@ version; the Portal validates it at submission and the reviewer sees every secre
 | `HRM_SMTP_PASSWORD` | no | **yes** | SMTP password for payslip mail. |
 | `PRIVOS_AGENT_BOT_CREDENTIAL` | yes | **yes** | Installation-bot credential used by `hrm.payroll.*` and `hrm.mail.*` to reach the Hub. |
 | `PRIVOS_AGENT_BOT_USER_ID` | yes | no | User id of that installation bot. |
-| `EMAILJS_SERVICE_ID` | yes | **yes** | EmailJS service id for the server-side mail relay. |
-| `EMAILJS_TEMPLATE_ID` | yes | **yes** | EmailJS template id; must expose `name`, `to_name`, `to_email`, `subject`, `message`. |
-| `EMAILJS_PUBLIC_KEY` | yes | **yes** | EmailJS public key (`user_id`) for the relay account. |
-| `EMAILJS_PRIVATE_KEY` | yes | **yes** | EmailJS private key sent as `accessToken`; required for non-browser API calls. |
+
+The Nango API key is a Docker secret defined in `compose.yaml`, outside this environment table. See
+[`docs/deploy-mail-ubuntu.md`](docs/deploy-mail-ubuntu.md) for provisioning and container recreation.
 
 Two rules this app demonstrates, and every publisher should follow:
 

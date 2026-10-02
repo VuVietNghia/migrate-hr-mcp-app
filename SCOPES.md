@@ -6,6 +6,7 @@ call site and explains the behavior when an optional permission is absent.
 | Permission | Requirement | Execution | Why / call site | Behavior when absent |
 |---|---|---|---|---|
 | `basic:information` | Required | Room; user + background | `usePrivosContext()` in `App.tsx` supplies `roomId`/`userRoles` to every tab. | Installation is cancelled if rejected. |
+| `bot:room:join` | Required | Room; interactive user | The Email tab calls `mcpapp.bot.joinCurrentRoom` before its first mailbox load. Later refreshes reuse the known Room state; the provider action retries the join after an initial failed load. | The mailbox connection cannot read or write its Room-scoped App Database state. |
 | `lists:read` | Required | Room; user | `cv-scored/CVScoredTab.tsx`, `lifecycle/services/PrivOSLifecycleService.ts`, `email-history/email-history-service.ts` via `mcpapp.lists.getAll/getItems/get/searchItems`; server `services/mail/email-history-repository.ts` via `mcpapp.lists.getItem`. | Installation is cancelled if rejected. |
 | `lists:write` | Required | Room; user | `pipeline-service.ts`, `PrivOSLifecycleService.ts`, `CVScoredTab.tsx` via `mcpapp.lists.create/addField/createItem/batchCreateItems/moveItemToStage`; server email history via `mcpapp.lists.create/createItem/updateItem/moveItemToStage`; `email-history/user-session-tracked-mail.ts` writes the same history rows over the user session after `hrm.mail.send` with `recordHistory: false` (send + retry from the UI). | Installation is cancelled if rejected. |
 | `files:read` | Required | Room; user | `recruitment-panel.tsx` (`mcpapp.files.getContent`), `pipeline-dashboard.tsx` (`mcpapp.files.get/search`), `drafting/services/CompanyContextProvider.ts`, `email-templates/interview-email-template-repository.ts`, `privos-rest.ts` (`mcpapp.folders.*`). | Installation is cancelled if rejected. |
@@ -22,6 +23,11 @@ installation-bot credential (`POST /api/v1/mcp-apps.tool-call`, `app-platform-to
 of the current user's session. Both refuse any call without a Hub-verified actor and pin every Hub
 request to `actor.roomId` (`payroll-tools.ts resolveActorRoom`). The Hub still enforces installation
 status, receipt, epoch, target room, exact grant, and bot membership on every mediated operation.
+
+`hrm.mail.connection.*` uses the same verified actor and Room pinning. Every verified Room member
+may get, connect, replace, or disconnect the shared mailbox; there is no owner-role gate. The
+`hr_mail_connections` collection stores one bounded metadata record per Room and queries by the
+unique `{roomId:1}` index with `limit:1`. Provider credentials remain at Nango.
 
 The app-owned `hr_bulk_export` tool does not request a workspace permission. It processes caller
 input and is gated by the Pro license feature.

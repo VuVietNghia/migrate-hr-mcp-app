@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canRetryEmail,
   filterEmailHistory,
   parseEmailHistoryItem,
   type EmailHistoryRecord,
 } from '../src/services/mail/email-history-model';
 
-const stages = { interviewSent: 's1', interviewFailed: 's2', employeeSent: 's3', employeeFailed: 's4' };
+const stages = {
+  interviewSent: 's1', interviewFailed: 's2', employeeSent: 's3', employeeFailed: 's4',
+};
 const item = (overrides: Record<string, unknown> = {}) => ({
   _id: 'i1',
   listId: 'l1',
@@ -40,6 +43,32 @@ describe('parseEmailHistoryItem', () => {
   it('returns null on unknown stage or missing required field', () => {
     expect(parseEmailHistoryItem(item({ stageId: 'zzz' }), stages)).toBeNull();
     expect(parseEmailHistoryItem(item({ customFields: [] }), stages)).toBeNull();
+  });
+  it('parses optional receipt metadata on a sent row', () => {
+    const record = parseEmailHistoryItem(item({
+      customFields: [
+        ...item().customFields,
+        { fieldId: 'provider', value: 'google' },
+        { fieldId: 'sender_email', value: 'hr@example.com' },
+        { fieldId: 'connection_revision', value: 'revision-a' },
+        { fieldId: 'provider_message_id', value: 'message-a' },
+      ],
+    }), stages)!;
+    expect(record).toMatchObject({ status: 'sent', provider: 'google', senderEmail: 'hr@example.com' });
+  });
+
+  it('keeps reading a sent row when receipt fields are absent', () => {
+    expect(parseEmailHistoryItem(item(), stages)?.status).toBe('sent');
+  });
+
+  it('keeps an ambiguous provider result in Gửi lỗi but does not allow retry', () => {
+    const marked = item({
+      stageId: 's2',
+      customFields: [...item().customFields, { fieldId: 'last_error', value: '[MAIL_SEND_UNKNOWN] timeout' }],
+    });
+    const record = parseEmailHistoryItem(marked, stages)!;
+    expect(record.status).toBe('failed');
+    expect(canRetryEmail(record)).toBe(false);
   });
 });
 

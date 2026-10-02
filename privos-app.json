@@ -1,9 +1,9 @@
 {
   "schemaVersion": 3,
   "kind": "mcp-app",
-  "name": "ai.privos.mcp-app-demo-hr-hrm",
+  "name": "ai.privos.mcp-app-cv-matcher-dev",
   "version": "3.0.12",
-  "title": "PrivOS HR MCP App",
+  "title": "CV Matcher App",
   "description": "HR Mini App for PrivOS: recruitment pipeline with AI CV scoring, scored-CV kanban, JD editor, employee lifecycle, payroll, drafting bot and email history.",
   "icon": "/public/icon.svg",
   "author": {
@@ -21,6 +21,14 @@
       "executionContext": "both",
       "feature": "core.context",
       "reason": "Identify the approved installation and room so every HR tab loads the right room’s data."
+    },
+    {
+      "scope": "bot:room:join",
+      "requirement": "required",
+      "context": "room",
+      "executionContext": "user",
+      "feature": "hr.mail.bot.room.join",
+      "reason": "Join the app installation agent bot to the current Room before starting mailbox OAuth so bot App Database calls are authorized."
     },
     {
       "scope": "lists:read",
@@ -58,7 +66,7 @@
       "scope": "db:read",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.read",
       "reason": "Read this room’s payroll records, active email-template settings and recruitment departments through mcpapp.db.query; installation-bot payroll calls remain pinned to the verified caller room."
     },
@@ -66,7 +74,7 @@
       "scope": "db:write",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.manage",
       "reason": "Create and update this room’s payroll records, active email-template settings and recruitment departments through mcpapp.db.create/update."
     },
@@ -74,7 +82,7 @@
       "scope": "db:schema:read",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.schema.read",
       "reason": "Read the payroll collection schema (mcpapp.db.getSchema) when diagnosing a room."
     },
@@ -82,7 +90,7 @@
       "scope": "db:schema:write",
       "requirement": "required",
       "context": "room",
-      "executionContext": "user",
+      "executionContext": "both",
       "feature": "hr.payroll.schema.manage",
       "reason": "Register room-scoped payroll, email-template settings and recruitment-department collections on first write (mcpapp.db.registerCollection)."
     },
@@ -106,17 +114,22 @@
     }
   ],
   "dataPolicy": {
-    "version": "2026-09-24",
+    "version": "2026-09-30",
     "retention": "App data is retained until the installation or corresponding HR records are deleted.",
-    "externalProcessing": true
+    "externalProcessing": true,
+    "externalDestinations": [
+      "Nango",
+      "Google Gmail API",
+      "Microsoft Graph API"
+    ]
   },
   "availabilityTier": "single",
   "capabilities": {
     "verifiedActor": true
   },
   "agentBot": {
-    "name": "PrivOS Demo Assistant",
-    "slug": "privos-demo-assistant"
+    "name": "CV Matcher Assistant",
+    "slug": "cv-matcher-assistant"
   },
   "tools": [
     {
@@ -132,10 +145,11 @@
         }
       },
       "ui": {
-        "resourceUri": "ui://ai.privos.mcp-app-demo-hr-hrm/form.html",
+        "resourceUri": "ui://ai.privos.mcp-app-cv-matcher-dev/form.html",
         "csp": {
-          "frame-src": [
-            "https://www.youtube.com"
+          "frameDomains": [
+            "https://www.youtube.com",
+            "https://connect.nango.dev"
           ]
         }
       }
@@ -252,9 +266,61 @@
       }
     },
     {
+      "name": "hrm.mail.connection.get",
+      "title": "Get Room mail connection",
+      "description": "Return the shared sender mailbox status for the verified Room.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "hrm.mail.connection.begin",
+      "title": "Begin Room mail connection",
+      "description": "Create a restricted Nango Connect session for Google or Microsoft mail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" },
+          "provider": { "type": "string", "enum": ["google", "microsoft"] },
+          "expectedRevision": { "type": ["string", "null"] }
+        },
+        "required": ["provider", "expectedRevision"]
+      }
+    },
+    {
+      "name": "hrm.mail.connection.complete",
+      "title": "Complete Room mail connection",
+      "description": "Verify and activate the candidate Nango connection for the verified Room.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" },
+          "attemptId": { "type": "string" },
+          "candidateConnectionId": { "type": "string" }
+        },
+        "required": ["attemptId", "candidateConnectionId"]
+      }
+    },
+    {
+      "name": "hrm.mail.connection.disconnect",
+      "title": "Disconnect Room mail connection",
+      "description": "Deactivate the shared sender mailbox and remove its Nango connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomId": { "type": "string" },
+          "expectedRevision": { "type": "string" }
+        },
+        "required": ["expectedRevision"]
+      }
+    },
+    {
       "name": "hrm.mail.send",
       "title": "Send HR email",
-      "description": "Send one email through the HR relay and record it in the room email history. Requires a Hub-verified actor.",
+      "description": "Send one email through the Room mailbox and record it in the room email history. Requires a Hub-verified actor.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -288,6 +354,9 @@
           },
           "jdName": {
             "type": "string"
+          },
+          "recordHistory": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -383,30 +452,6 @@
       "description": "This app's agent bot Hub user id, paired with PRIVOS_AGENT_BOT_CREDENTIAL for REST auth. Written only by a workspace admin from this app's settings page.",
       "required": false,
       "secret": false
-    },
-    {
-      "key": "EMAILJS_SERVICE_ID",
-      "description": "EmailJS service id used by the server-side HR mail relay.",
-      "required": true,
-      "secret": true
-    },
-    {
-      "key": "EMAILJS_TEMPLATE_ID",
-      "description": "EmailJS template id; the template must expose name, to_name, to_email, subject, message.",
-      "required": true,
-      "secret": true
-    },
-    {
-      "key": "EMAILJS_PUBLIC_KEY",
-      "description": "EmailJS public key (user_id) for the relay account.",
-      "required": true,
-      "secret": true
-    },
-    {
-      "key": "EMAILJS_PRIVATE_KEY",
-      "description": "EmailJS private key sent as accessToken; required for non-browser API calls.",
-      "required": true,
-      "secret": true
     }
   ],
   "resourceManifestTemplate": []

@@ -8,12 +8,22 @@ in one commit.
 
 ### Added
 
+- Room mailbox connections let every verified Room member connect, replace, or disconnect one
+  shared Google Workspace or Microsoft 365 sender through Nango Connect. App Database stores one
+  indexed metadata record per Room; provider credentials remain at Nango.
+- Compose mounts the system-level Nango API key at `/run/secrets/nango_api_key`; mail provider and
+  Nango keys are not read from environment variables.
+
 - **Employee email templates.** Email → Mẫu email → Nhân sự lists, edits, creates and activates
   lifecycle templates exactly like the interview ones, stored in `hr-miniapp/email/nhan-su` and
   seeded with the four former built-in drafts. The Hồ sơ NS composer no longer offers a template
   picker: it renders the Room's active employee template and shows its name read-only.
 
 ### Changed
+
+- Email delivery moved from EmailJS to Gmail API and Microsoft Graph. Sends are queued by active
+  connection revision and revalidated against the Room before dispatch. Ambiguous outcomes are
+  recorded as `unknown` and cannot be retried from the UI.
 
 - **The active email template lives in the App Database.** Collection `hr_email_template_settings`
   (one row per Room per category) replaces the `_active-template.md` pointer file in Room Files.

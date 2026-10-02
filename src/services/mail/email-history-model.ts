@@ -1,5 +1,7 @@
 export const EMAIL_HISTORY_LIST_NAME = 'Quản lí Email';
 
+export const MAIL_SEND_UNKNOWN_MARKER = '[MAIL_SEND_UNKNOWN]';
+
 export const EMAIL_HISTORY_STAGES = {
   interviewSent: 'Email Phỏng vấn - Đã gửi',
   interviewFailed: 'Email Phỏng vấn - Gửi lỗi',
@@ -23,6 +25,10 @@ export const EMAIL_HISTORY_FIELD_IDS = {
   attemptCount: 'attempt_count',
   lastError: 'last_error',
   requestedBy: 'requested_by',
+  provider: 'provider',
+  senderEmail: 'sender_email',
+  connectionRevision: 'connection_revision',
+  providerMessageId: 'provider_message_id',
 } as const;
 
 export type EmailHistoryStatus = 'sent' | 'failed';
@@ -64,6 +70,10 @@ export interface EmailHistoryRecord extends StoredEmailPayload {
   attemptCount: number;
   lastError?: string;
   requestedBy?: string;
+  provider?: 'google' | 'microsoft';
+  senderEmail?: string;
+  connectionRevision?: string;
+  providerMessageId?: string;
 }
 
 type PrivOSCustomField = {
@@ -148,7 +158,10 @@ export function parseEmailHistoryItem(
   const attemptCount = Number.isFinite(parsedAttemptCount) && parsedAttemptCount >= 1
     ? Math.floor(parsedAttemptCount)
     : 1;
+  const rawProvider = asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.provider));
+  const provider = rawProvider === 'google' || rawProvider === 'microsoft' ? rawProvider : undefined;
 
+  const lastError = asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.lastError));
   return {
     id,
     listId,
@@ -166,8 +179,12 @@ export function parseEmailHistoryItem(
     cvListId: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.cvListId)),
     jdName: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.jdName)),
     sentAt: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.sentAt)),
-    lastError: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.lastError)),
+    lastError,
     requestedBy: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.requestedBy)),
+    provider,
+    senderEmail: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.senderEmail)),
+    connectionRevision: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.connectionRevision)),
+    providerMessageId: asNonEmptyString(fields.get(EMAIL_HISTORY_FIELD_IDS.providerMessageId)),
   };
 }
 
@@ -217,7 +234,8 @@ export function filterEmailHistory(
 }
 
 export function canRetryEmail(record: EmailHistoryRecord): boolean {
-  return record.status === 'failed';
+  return record.status === 'failed'
+    && !record.lastError?.startsWith(MAIL_SEND_UNKNOWN_MARKER);
 }
 
 export function canDeleteEmail(record: EmailHistoryRecord): boolean {

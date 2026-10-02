@@ -5,6 +5,13 @@ import { createManifest, MARKETPLACE_MANIFEST_FIELDS } from '../src/manifest';
 import { lintManifest } from '@privos_ai/app-server/manifest-tools';
 
 describe('manifest', () => {
+  it('uses the CV Matcher identity for the generated agent bot', () => {
+    expect(publisherManifest.agentBot).toEqual({
+      name: 'CV Matcher Assistant',
+      slug: 'cv-matcher-assistant',
+    });
+  });
+
   it('serves the canonical Marketplace manifest', () => {
     const manifest = createManifest();
     expect(Object.keys(manifest)).toEqual(MARKETPLACE_MANIFEST_FIELDS);
@@ -32,5 +39,50 @@ describe('manifest', () => {
     for (const tool of uiTools) {
       expect(new URL(tool.ui!.resourceUri!).host).toBe(publisherManifest.name);
     }
+  });
+
+  it('declares the complete Room mailbox contract without EmailJS environment keys', () => {
+    const toolNames = publisherManifest.tools.map(tool => tool.name);
+    expect(toolNames).toEqual(expect.arrayContaining([
+      'hrm.mail.connection.get',
+      'hrm.mail.connection.begin',
+      'hrm.mail.connection.complete',
+      'hrm.mail.connection.disconnect',
+    ]));
+    const send = publisherManifest.tools.find(tool => tool.name === 'hrm.mail.send');
+    expect(send?.inputSchema.properties).toHaveProperty('recordHistory');
+    expect(publisherManifest.env.some(entry => entry.key.startsWith('EMAILJS_'))).toBe(false);
+    expect(publisherManifest.dataPolicy.externalDestinations).toEqual(expect.arrayContaining([
+      'Nango',
+      'Google Gmail API',
+      'Microsoft Graph API',
+    ]));
+    const dashboard = publisherManifest.tools.find(tool => tool.name === 'hr_management_dashboard');
+    expect(dashboard?.ui?.csp?.frameDomains).toContain('https://connect.nango.dev');
+  });
+
+  it('grants the Room mail agent bot access to its App Database state', () => {
+    const permissions = new Map(
+      publisherManifest.permissions.map(permission => [permission.scope, permission]),
+    );
+
+    for (const scope of ['db:read', 'db:write', 'db:schema:read', 'db:schema:write']) {
+      expect(permissions.get(scope)).toMatchObject({
+        requirement: 'required',
+        context: 'room',
+        executionContext: 'both',
+      });
+    }
+  });
+
+  it('lets an interactive Room member join the app agent bot before mail OAuth', () => {
+    const permission = publisherManifest.permissions.find(entry => entry.scope === 'bot:room:join');
+
+    expect(permission).toMatchObject({
+      requirement: 'required',
+      context: 'room',
+      executionContext: 'user',
+      feature: 'hr.mail.bot.room.join',
+    });
   });
 });

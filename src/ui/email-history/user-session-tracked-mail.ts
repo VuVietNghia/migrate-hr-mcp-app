@@ -1,5 +1,7 @@
 import { parseToolResult, type McpApp } from '@privos_ai/app-react';
 
+import { parseMailReceipt, type MailReceipt } from '../../services/mail/mail-contracts';
+import { isMailErrorCode, MailError } from '../../services/mail/mail-errors';
 import type { StoredEmailPayload } from '../../services/mail/email-history-model';
 import { EmailHistoryRepository } from '../../services/mail/email-history-repository';
 import type { HubToolCaller } from '../../services/hub-tool-caller';
@@ -20,8 +22,9 @@ export interface UiMailRequest {
 }
 
 export interface UiMailSendResult {
-  /** False when the email left EmailJS but its history row could not be written — never resend then. */
+  /** False when the provider accepted the email but its history row could not be written. */
   logged: boolean;
+  receipt: MailReceipt;
 }
 
 function toolErrorText(response: unknown, name: string): string {
@@ -30,12 +33,36 @@ function toolErrorText(response: unknown, name: string): string {
   return typeof text === 'string' && text ? text : `${name} failed`;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+export function parseMailToolResult(raw: unknown): unknown {
+  const envelope = asRecord(raw);
+  if (envelope.isError === true) {
+    const text = toolErrorText(raw, 'hrm.mail');
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new MailError('MAIL_CONFIGURATION_UNAVAILABLE');
+    }
+    const error = asRecord(payload);
+    if (!isMailErrorCode(error.code)) throw new MailError('MAIL_CONFIGURATION_UNAVAILABLE');
+    const retryAfterSeconds = typeof error.retryAfterSeconds === 'number' ? error.retryAfterSeconds : undefined;
+    throw new MailError(error.code, retryAfterSeconds);
+  }
+  return parseToolResult(raw);
+}
+
 /** Mediated Hub tools run AS THE CURRENT USER (`lists:read` / `lists:write`), unlike the server's bot caller. */
 function createUserSessionCaller(app: MailApp): HubToolCaller {
   return async (name, args = {}) => {
     const response = await app.callServerTool({ name, arguments: args });
     if ((response as { isError?: boolean } | null)?.isError) {
-      throw new Error(toolErrorText(response, name));
+      throw new Error(`Hub operation failed: ${name}`);
     }
     return response;
   };
@@ -60,7 +87,7 @@ function toPayload(request: UiMailRequest): StoredEmailPayload {
 }
 
 /**
- * Sends through the server relay (EmailJS secrets stay server-side) with `recordHistory: false`, then
+ * Sends through the Room mailbox gateway with `recordHistory: false`, then
  * writes the "Tất cả / Đã gửi / Gửi lỗi" row itself over the user session. The server's own history
  * path needs the installation-bot credential, which only a workspace admin can issue — without it every
  * email went out unlogged.
@@ -75,35 +102,38 @@ export class UserSessionTrackedMail {
   async send(request: UiMailRequest): Promise<UiMailSendResult> {
     const payload = toPayload(request);
     let requestedBy: string | undefined;
+    let receipt: MailReceipt;
     try {
-      const result = parseToolResult(await this.app.callServerTool({
+      const result = asRecord(parseMailToolResult(await this.app.callServerTool({
         name: 'hrm.mail.send',
         arguments: { ...request, recordHistory: false },
-      })) as { requestedBy?: unknown } | null;
-      requestedBy = typeof result?.requestedBy === 'string' ? result.requestedBy : undefined;
+      })));
+      requestedBy = typeof result.requestedBy === 'string' ? result.requestedBy : undefined;
+      receipt = parseMailReceipt(result.receipt);
     } catch (deliveryError) {
       try {
         await this.history.createResult(request.roomId, payload, 'failed', deliveryError);
-      } catch (historyError) {
-        console.warn('[hrm.mail] send failed and its history row could not be written', historyError);
+      } catch {
+        console.warn('[hrm.mail] send failed and its history row could not be written');
       }
       throw deliveryError;
     }
 
     try {
-      await this.history.createResult(request.roomId, payload, 'sent', undefined, requestedBy);
-      return { logged: true };
-    } catch (historyError) {
-      console.warn('[hrm.mail] email delivered, history write failed', historyError);
-      return { logged: false };
+      await this.history.createResult(request.roomId, payload, 'sent', undefined, requestedBy, receipt);
+      return { logged: true, receipt };
+    } catch {
+      console.warn('[hrm.mail] email delivered, history write failed');
+      return { logged: false, receipt };
     }
   }
 
   /** Re-sends a "Gửi lỗi" row from its stored content and moves that same row to its new status. */
-  async retry(roomId: string, itemId: string): Promise<void> {
+  async retry(roomId: string, itemId: string): Promise<UiMailSendResult> {
     const { record, payload } = await this.history.prepareRetry(roomId, itemId);
+    let receipt: MailReceipt;
     try {
-      await this.app.callServerTool({
+      const result = asRecord(parseMailToolResult(await this.app.callServerTool({
         name: 'hrm.mail.send',
         arguments: {
           roomId,
@@ -117,17 +147,24 @@ export class UserSessionTrackedMail {
           ...(payload.jdName ? { jdName: payload.jdName } : {}),
           recordHistory: false,
         },
-      }).then(parseToolResult);
+      })));
+      receipt = parseMailReceipt(result.receipt);
     } catch (deliveryError) {
       await this.history.markFailed(roomId, record.id, deliveryError);
       throw deliveryError;
     }
 
     try {
-      await this.history.markSent(roomId, record.id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Email đã gửi nhưng không thể cập nhật lịch sử: ${message}`);
+      await this.history.markSent(roomId, record.id, receipt);
+      return { logged: true, receipt };
+    } catch {
+      console.warn('[hrm.mail] email delivered, history update failed');
+      try {
+        await this.history.markFailed(roomId, record.id, new MailError('MAIL_SEND_UNKNOWN'));
+      } catch {
+        console.warn('[hrm.mail] accepted retry could not be locked against another retry');
+      }
+      return { logged: false, receipt };
     }
   }
 }

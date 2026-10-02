@@ -1,12 +1,14 @@
 import {
   EMAIL_HISTORY_FIELD_IDS,
   EMAIL_HISTORY_LIST_NAME,
+  MAIL_SEND_UNKNOWN_MARKER,
   EMAIL_HISTORY_STAGES,
   parseEmailHistoryItem,
   type EmailHistoryRecord,
   type EmailHistoryStageIds,
   type StoredEmailPayload,
 } from './email-history-model';
+import type { MailReceipt } from './mail-contracts';
 import type { HubToolCaller } from '../hub-tool-caller';
 
 export interface EmailHistoryStore {
@@ -35,6 +37,10 @@ const FIELD_DEFINITIONS = [
   { _id: EMAIL_HISTORY_FIELD_IDS.attemptCount, name: 'Số lần gửi', type: 'NUMBER' },
   { _id: EMAIL_HISTORY_FIELD_IDS.lastError, name: 'Lỗi gần nhất', type: 'TEXT' },
   { _id: EMAIL_HISTORY_FIELD_IDS.requestedBy, name: 'Người gửi', type: 'TEXT' },
+  { _id: EMAIL_HISTORY_FIELD_IDS.provider, name: 'Nhà cung cấp', type: 'TEXT' },
+  { _id: EMAIL_HISTORY_FIELD_IDS.senderEmail, name: 'Mailbox gửi', type: 'TEXT' },
+  { _id: EMAIL_HISTORY_FIELD_IDS.connectionRevision, name: 'Phiên bản kết nối', type: 'TEXT' },
+  { _id: EMAIL_HISTORY_FIELD_IDS.providerMessageId, name: 'Mã thư nhà cung cấp', type: 'TEXT' },
 ];
 
 const STAGE_DEFINITIONS = [
@@ -43,6 +49,13 @@ const STAGE_DEFINITIONS = [
   { name: EMAIL_HISTORY_STAGES.employeeSent, color: '#16a34a' },
   { name: EMAIL_HISTORY_STAGES.employeeFailed, color: '#dc2626' },
 ];
+
+const RECEIPT_FIELD_IDS = new Set<string>([
+  EMAIL_HISTORY_FIELD_IDS.provider,
+  EMAIL_HISTORY_FIELD_IDS.senderEmail,
+  EMAIL_HISTORY_FIELD_IDS.connectionRevision,
+  EMAIL_HISTORY_FIELD_IDS.providerMessageId,
+]);
 
 function parseToolResponse(response: unknown): any {
   if (!response || typeof response !== 'object') return response;
@@ -77,7 +90,12 @@ function resolveStageIds(stages: unknown): EmailHistoryStageIds | null {
   const employeeSent = idsByName.get(EMAIL_HISTORY_STAGES.employeeSent);
   const employeeFailed = idsByName.get(EMAIL_HISTORY_STAGES.employeeFailed);
   return interviewSent && interviewFailed && employeeSent && employeeFailed
-    ? { interviewSent, interviewFailed, employeeSent, employeeFailed }
+    ? {
+        interviewSent,
+        interviewFailed,
+        employeeSent,
+        employeeFailed,
+      }
     : null;
 }
 
@@ -93,14 +111,20 @@ function getStageId(
 }
 
 function normalizeError(error: unknown): string {
+  const code = error && typeof error === 'object'
+    ? (error as { code?: unknown }).code
+    : undefined;
   const message = error instanceof Error ? error.message : String(error);
-  return message
+  const normalized = message
     .replace(/(accessToken|privateKey|authorization)\s*[=:]\s*[^\s,;]+/gi, '$1=[REDACTED]')
     .slice(0, 1000);
+  return code === 'MAIL_SEND_UNKNOWN' && !normalized.startsWith(MAIL_SEND_UNKNOWN_MARKER)
+    ? `${MAIL_SEND_UNKNOWN_MARKER} ${normalized}`
+    : normalized;
 }
 
 function recordToCustomFields(record: EmailHistoryRecord, recordId: string) {
-  return [
+  const fields: Array<{ fieldId: string; value: string | number }> = [
     { fieldId: EMAIL_HISTORY_FIELD_IDS.recordId, value: recordId },
     { fieldId: EMAIL_HISTORY_FIELD_IDS.source, value: record.source },
     { fieldId: EMAIL_HISTORY_FIELD_IDS.recipientName, value: record.recipientName },
@@ -117,6 +141,11 @@ function recordToCustomFields(record: EmailHistoryRecord, recordId: string) {
     { fieldId: EMAIL_HISTORY_FIELD_IDS.lastError, value: record.lastError || '' },
     { fieldId: EMAIL_HISTORY_FIELD_IDS.requestedBy, value: record.requestedBy || '' },
   ];
+  if (record.provider) fields.push({ fieldId: EMAIL_HISTORY_FIELD_IDS.provider, value: record.provider });
+  if (record.senderEmail) fields.push({ fieldId: EMAIL_HISTORY_FIELD_IDS.senderEmail, value: record.senderEmail });
+  if (record.connectionRevision) fields.push({ fieldId: EMAIL_HISTORY_FIELD_IDS.connectionRevision, value: record.connectionRevision });
+  if (record.providerMessageId) fields.push({ fieldId: EMAIL_HISTORY_FIELD_IDS.providerMessageId, value: record.providerMessageId });
+  return fields;
 }
 
 function recordPayload(record: EmailHistoryRecord): StoredEmailPayload {
@@ -163,6 +192,7 @@ export class EmailHistoryRepository {
     status: EmailHistoryRecord['status'],
     error?: unknown,
     requestedBy?: string,
+    receipt?: MailReceipt,
   ): Promise<EmailHistoryRecord> {
     const store = await this.ensureStore(roomId);
     const timestamp = this.now();
@@ -178,8 +208,12 @@ export class EmailHistoryRepository {
       updatedAt: timestamp,
       sentAt: status === 'sent' ? timestamp : undefined,
       attemptCount: 1,
-      lastError: status === 'failed' ? normalizeError(error) : undefined,
+      lastError: status === 'sent' ? undefined : normalizeError(error),
       requestedBy,
+      provider: receipt?.provider,
+      senderEmail: receipt?.senderEmail,
+      connectionRevision: receipt?.connectionRevision,
+      providerMessageId: receipt?.providerMessageId,
     };
 
     const response = parseToolResponse(await this.callTool('mcpapp.lists.createItem', {
@@ -203,7 +237,7 @@ export class EmailHistoryRepository {
     return { ...draft, id: itemId };
   }
 
-  async markSent(roomId: string, itemId: string): Promise<EmailHistoryRecord> {
+  async markSent(roomId: string, itemId: string, receipt?: MailReceipt): Promise<EmailHistoryRecord> {
     const store = await this.ensureStore(roomId);
     const current = await this.getRecord(roomId, itemId);
     const timestamp = this.now();
@@ -215,6 +249,10 @@ export class EmailHistoryRepository {
       sentAt: timestamp,
       attemptCount: current.attemptCount + 1,
       lastError: undefined,
+      provider: receipt?.provider ?? current.provider,
+      senderEmail: receipt?.senderEmail ?? current.senderEmail,
+      connectionRevision: receipt?.connectionRevision ?? current.connectionRevision,
+      providerMessageId: receipt?.providerMessageId ?? current.providerMessageId,
     });
   }
 
@@ -266,6 +304,7 @@ export class EmailHistoryRepository {
       }
       const stageIds = resolveStageIds(stages);
       if (!listId || !stageIds) throw new Error('List lịch sử email thiếu cấu hình stage bắt buộc.');
+      await this.ensureReceiptFields(listId, existing);
       return { listId, stageIds };
     }
 
@@ -285,6 +324,35 @@ export class EmailHistoryRepository {
     const stageIds = resolveStageIds(created?.stages || list?.stages);
     if (!listId || !stageIds) throw new Error('Không thể khởi tạo List lịch sử email.');
     return { listId, stageIds };
+  }
+
+  private async ensureReceiptFields(listId: string, existing: unknown): Promise<void> {
+    const existingRecord = existing && typeof existing === 'object' ? existing as Record<string, unknown> : {};
+    let definitions = existingRecord.fieldDefinitions;
+    if (!Array.isArray(definitions)) {
+      const detail = parseToolResponse(await this.callTool('mcpapp.lists.get', { listId }));
+      const detailRecord = detail && typeof detail === 'object' ? detail as Record<string, unknown> : {};
+      const listRecord = detailRecord.list && typeof detailRecord.list === 'object'
+        ? detailRecord.list as Record<string, unknown>
+        : {};
+      definitions = detailRecord.fieldDefinitions ?? listRecord.fieldDefinitions;
+    }
+    if (!Array.isArray(definitions)) return;
+    const existingIds = new Set(definitions.flatMap(field => {
+      if (!field || typeof field !== 'object') return [];
+      const row = field as Record<string, unknown>;
+      const id = typeof row._id === 'string' ? row._id : typeof row.id === 'string' ? row.id : null;
+      return id ? [id] : [];
+    }));
+    for (const field of FIELD_DEFINITIONS.filter(definition => RECEIPT_FIELD_IDS.has(definition._id))) {
+      if (existingIds.has(field._id)) continue;
+      await this.callTool('mcpapp.lists.addField', {
+        listId,
+        fieldId: field._id,
+        name: field.name,
+        type: field.type,
+      });
+    }
   }
 
   private async updateRecord(record: EmailHistoryRecord): Promise<EmailHistoryRecord> {

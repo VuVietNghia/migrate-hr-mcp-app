@@ -2,6 +2,7 @@
 .github
 .env
 .env.*
+docker-data
 .agents
 .gemini
 .recyclebin
@@ -10,5 +11,6 @@ dist-source
 node_modules
 *.pem
 *.key
+privos-standalone-identity.json
 *.tsbuildinfo
 coverage

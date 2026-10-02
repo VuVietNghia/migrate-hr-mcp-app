@@ -1,5 +1,5 @@
 import type { EmailHistoryRecord, StoredEmailPayload } from './email-history-model';
-import type { SendMailParams } from './mail-relay-service';
+import type { MailMessage, MailReceipt } from './mail-contracts';
 
 export interface SendTrackedMailRequest extends StoredEmailPayload {
   roomId: string;
@@ -13,8 +13,9 @@ export interface EmailHistoryGateway {
     status: EmailHistoryRecord['status'],
     error?: unknown,
     requestedBy?: string,
+    receipt?: MailReceipt,
   ): Promise<EmailHistoryRecord>;
-  markSent(roomId: string, itemId: string): Promise<EmailHistoryRecord>;
+  markSent(roomId: string, itemId: string, receipt?: MailReceipt): Promise<EmailHistoryRecord>;
   markFailed(roomId: string, itemId: string, error: unknown): Promise<EmailHistoryRecord>;
   prepareRetry(
     roomId: string,
@@ -23,20 +24,20 @@ export interface EmailHistoryGateway {
 }
 
 export interface MailDeliveryGateway {
-  queueMail(params: SendMailParams): Promise<void>;
+  queueMail(params: MailMessage): Promise<MailReceipt>;
 }
 
 /**
- * The message has already left EmailJS once `queueMail` resolves, so a failure
+ * The provider has already accepted the message once `queueMail` resolves, so a failure
  * to write the history row is reported as `sent_unlogged` rather than an error:
  * surfacing it as a send failure makes the operator resend, and the recipient
  * gets the same email twice.
  */
 export type SendTrackedMailOutcome =
-  | { status: 'sent'; record: EmailHistoryRecord }
-  | { status: 'sent_unlogged'; historyError: string };
+  | { status: 'sent'; record: EmailHistoryRecord; receipt: MailReceipt }
+  | { status: 'sent_unlogged'; receipt: MailReceipt };
 
-function toDeliveryParams(payload: StoredEmailPayload): SendMailParams {
+function toDeliveryParams(payload: StoredEmailPayload): MailMessage {
   return {
     toName: payload.recipientName,
     toEmail: payload.recipientEmail,
@@ -54,37 +55,39 @@ export class TrackedMailService {
   ) {}
 
   /** Delivery only: for a caller that keeps the history row itself (the UI, over the user session). */
-  async deliver(payload: StoredEmailPayload): Promise<void> {
-    await this.delivery.queueMail(toDeliveryParams(payload));
+  async deliver(payload: StoredEmailPayload): Promise<MailReceipt> {
+    return this.delivery.queueMail(toDeliveryParams(payload));
   }
 
   async send(request: SendTrackedMailRequest): Promise<SendTrackedMailOutcome> {
     const { roomId, requestedBy, ...payload } = request;
 
     try {
-      await this.delivery.queueMail(toDeliveryParams(payload));
+      const receipt = await this.delivery.queueMail(toDeliveryParams(payload));
+      try {
+        const record = await this.history.createResult(roomId, payload, 'sent', undefined, requestedBy, receipt);
+        return { status: 'sent', record, receipt };
+      } catch {
+        console.warn('[hrm.mail] email delivered, history write failed');
+        return { status: 'sent_unlogged', receipt };
+      }
     } catch (deliveryError) {
       try {
-        await this.history.createResult(roomId, payload, 'failed', deliveryError, requestedBy);
-      } catch (historyError) {
-        const message = historyError instanceof Error ? historyError.message : String(historyError);
-        throw new Error(`Gửi email thất bại và không thể lưu lịch sử: ${message}`);
+        await this.history.createResult(
+          roomId,
+          payload,
+          'failed',
+          deliveryError,
+          requestedBy,
+        );
+      } catch {
+        throw new Error('Gửi email thất bại và không thể lưu lịch sử.');
       }
       throw deliveryError;
     }
-
-    try {
-      const record = await this.history.createResult(roomId, payload, 'sent', undefined, requestedBy);
-      return { status: 'sent', record };
-    } catch (historyError) {
-      const historyErrorMessage = historyError instanceof Error ? historyError.message : String(historyError);
-      // Swallowed on purpose (see SendTrackedMailOutcome) — but never silently.
-      console.warn('[hrm.mail] email delivered, history write failed:', historyErrorMessage);
-      return { status: 'sent_unlogged', historyError: historyErrorMessage };
-    }
   }
 
-  async retry(roomId: string, itemId: string): Promise<EmailHistoryRecord> {
+  async retry(roomId: string, itemId: string): Promise<SendTrackedMailOutcome> {
     const retryKey = `${roomId}:${itemId}`;
     if (this.activeRetries.has(retryKey)) {
       throw new Error('Email này đang được gửi lại. Vui lòng chờ kết quả.');
@@ -94,17 +97,17 @@ export class TrackedMailService {
     try {
       const prepared = await this.history.prepareRetry(roomId, itemId);
       try {
-        await this.delivery.queueMail(toDeliveryParams(prepared.payload));
+        const receipt = await this.delivery.queueMail(toDeliveryParams(prepared.payload));
+        try {
+          const updated = await this.history.markSent(roomId, prepared.record.id, receipt);
+          return { status: 'sent', record: updated, receipt };
+        } catch {
+          console.warn('[hrm.mail] email delivered, history update failed');
+          return { status: 'sent_unlogged', receipt };
+        }
       } catch (error) {
         await this.history.markFailed(roomId, prepared.record.id, error);
         throw error;
-      }
-
-      try {
-        return await this.history.markSent(roomId, prepared.record.id);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Email đã gửi nhưng không thể cập nhật lịch sử: ${message}`);
       }
     } finally {
       this.activeRetries.delete(retryKey);

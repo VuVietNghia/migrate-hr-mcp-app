@@ -1,0 +1,32 @@
+services:
+  hr-app:
+    image: privos-mcp-app-demo:local
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+      PRIVOS_STANDALONE_IDENTITY_FILE: /run/privos/identity/privos-standalone-identity.json
+    volumes:
+      - privos_identity:/run/privos/identity
+    secrets:
+      - nango_api_key
+    ports:
+      - "3000:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    restart: unless-stopped
+
+volumes:
+  privos_identity:
+    name: privos_hr_identity
+    external: true
+
+secrets:
+  nango_api_key:
+    file: ./docker-data/secrets/nango_api_key
