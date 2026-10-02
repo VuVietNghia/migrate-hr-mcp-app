@@ -12,6 +12,35 @@ export interface MailConnectionPanelProps {
 	active: boolean;
 }
 
+export type MailConnectionAction = 'connect' | 'coming-soon';
+
+export function resolveMailConnectionAction(provider: MailProvider): MailConnectionAction {
+	return provider === 'microsoft' ? 'coming-soon' : 'connect';
+}
+
+export function MicrosoftComingSoonDialog({ onClose }: { onClose: () => void }) {
+	return (
+		<div
+			className="mail-coming-soon-backdrop"
+			role="presentation"
+			onMouseDown={event => {
+				if (event.target === event.currentTarget) onClose();
+			}}
+		>
+			<div
+				className="mail-coming-soon-dialog"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="mail-coming-soon-title"
+			>
+				<h3 id="mail-coming-soon-title">Microsoft 365</h3>
+				<p>Chức năng này đang phát triển</p>
+				<button type="button" autoFocus onClick={onClose}>Đóng</button>
+			</div>
+		</div>
+	);
+}
+
 function providerName(provider: MailProvider): string {
 	switch (provider) {
 		case 'google': return 'Google Workspace';
@@ -29,6 +58,7 @@ export function MailConnectionPanel({ app, roomId, active }: MailConnectionPanel
 		[app, roomId],
 	);
 	const [state, setState] = useState<MailConnectionState>(controller.state);
+	const [microsoftComingSoon, setMicrosoftComingSoon] = useState(false);
 
 	useEffect(() => {
 		const unsubscribe = controller.subscribe(setState);
@@ -42,12 +72,28 @@ export function MailConnectionPanel({ app, roomId, active }: MailConnectionPanel
 		if (active) void controller.load();
 	}, [active, controller]);
 
+	useEffect(() => {
+		if (!microsoftComingSoon) return;
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') setMicrosoftComingSoon(false);
+		};
+		window.addEventListener('keydown', closeOnEscape);
+		return () => window.removeEventListener('keydown', closeOnEscape);
+	}, [microsoftComingSoon]);
+
 	const view = state.kind === 'loading' ? null : state.view;
 	const connection = view?.connection ?? null;
 	const busy = state.kind === 'loading' || state.kind === 'connecting';
-	const connect = (provider: MailProvider) => { void controller.connect(provider); };
+	const connect = (provider: MailProvider) => {
+		if (resolveMailConnectionAction(provider) === 'coming-soon') {
+			setMicrosoftComingSoon(true);
+			return;
+		}
+		void controller.connect(provider);
+	};
 
 	return (
+		<>
 		<section className="mail-connection-panel" aria-labelledby="mail-connection-title">
 			<div>
 				<h2 id="mail-connection-title">Tài khoản gửi email của Room</h2>
@@ -78,5 +124,9 @@ export function MailConnectionPanel({ app, roomId, active }: MailConnectionPanel
 				)}
 			</div>
 		</section>
+		{microsoftComingSoon && (
+			<MicrosoftComingSoonDialog onClose={() => setMicrosoftComingSoon(false)} />
+		)}
+		</>
 	);
 }
