@@ -13,19 +13,33 @@ import { assertIdentityResponse, assertSendResponse } from './mail-provider-resp
 import type { NangoGateway } from './nango-gateway';
 
 const GOOGLE_IDENTITY_ENDPOINT = 'https://openidconnect.googleapis.com/v1/userinfo';
+const GMAIL_PROFILE_ENDPOINT = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
 const GMAIL_SEND_ENDPOINT = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
 
 export class GoogleMailAdapter implements MailProviderAdapter {
 	constructor(private readonly gateway: NangoGateway, private readonly now: () => number = Date.now) {}
 
 	async identity(connectionId: string, timeoutMs: number): Promise<string> {
+		const deadline = this.now() + timeoutMs;
 		const response = await this.gateway.proxy({
 			provider: 'google',
 			connectionId,
 			method: 'GET',
 			endpoint: GOOGLE_IDENTITY_ENDPOINT,
-			timeoutMs,
+			timeoutMs: this.remaining(deadline),
 		});
+		if (response.status === 401 || response.status === 403) {
+			// Gmail-only OAuth grants cannot use OpenID UserInfo. The authenticated
+			// Gmail profile verifies the mailbox without relying on dashboard metadata.
+			const profileResponse = await this.gateway.proxy({
+				provider: 'google', connectionId, method: 'GET', endpoint: GMAIL_PROFILE_ENDPOINT,
+				timeoutMs: this.remaining(deadline),
+			});
+			assertIdentityResponse(profileResponse);
+			const profile = z.object({ emailAddress: z.email() }).safeParse(profileResponse.data);
+			if (!profile.success) throw new MailError('MAIL_RECONNECT_REQUIRED');
+			return profile.data.emailAddress;
+		}
 		assertIdentityResponse(response);
 		const identity = z.object({ email: z.email(), email_verified: z.literal(true) }).passthrough().safeParse(response.data);
 		if (!identity.success) throw new MailError('MAIL_RECONNECT_REQUIRED');

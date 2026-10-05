@@ -58,6 +58,51 @@ unverified `hr_whoami` actor, credentials cached to disk — is only ever reacha
 The Vite UI defaults to `http://localhost:5179`. `DEV_TUNNEL=cloudflared` is optional when the
 browser displaying Hub is on another machine.
 
+### Paired app development in WSL
+
+For a project already paired through `npm run pair`, use the existing standalone identity and
+run these commands from the project directory in WSL:
+
+```bash
+npm run dev:local
+```
+
+This watches backend changes with `tsx watch` and serves the UI through Vite HMR on port 5179.
+Polling catches edits made by a Windows IDE under `/mnt/e`. UI edits use HMR without restarting
+the backend; backend edits restart the app and reconnect the relay. Open Hub in a browser on
+the same machine and reopen the app once after switching from the built UI to the dev UI.
+The paired identity and Hub authorization checks still apply; this command does not bypass them.
+
+Put only the Nango API key in `docker-data/secrets/nango_api_key`. `dev:local` selects that file
+through `NANGO_SECRET_FILE`, which contains a path, never a key. Ordinary production startup
+defaults to `/run/secrets/nango_api_key`; Compose mounts the same host file there. Mailbox
+connections remain scoped to each Room and provider tokens remain in Nango.
+
+Run tests continuously in a second WSL terminal:
+
+```bash
+npm run test:watch
+```
+
+Before deploying, stop the WSL app with Ctrl+C, start Docker Engine, then run from WSL:
+
+```bash
+npm run typecheck
+npm run build
+npm test
+npm run docker:build
+docker compose up -d --no-deps hr-app
+docker compose ps
+curl --fail http://127.0.0.1:3000/ready
+```
+
+Compose requires the existing paired identity in the external `privos_hr_identity` volume and
+a local `.env` file (an empty file is sufficient when no overrides are needed). Verify the UI,
+Google connection and one intended test delivery in the container before deploying the image.
+Stop the container with `docker compose stop hr-app` before returning to `dev:local`; only one
+runtime should use that paired installation at a time. Install dependencies in WSL rather than
+Windows; the Docker build runs its own `npm ci` and excludes host `node_modules`.
+
 ## Managed direct runtime
 
 The Marketplace image starts Direct HTTP transport by default (`managed` mode once the platform

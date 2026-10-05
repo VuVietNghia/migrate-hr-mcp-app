@@ -77,6 +77,15 @@ async function start(): Promise<void> {
 		const { setDevPublicUrl } = await import('./mcp-message-handlers');
 		const dev = await startDevUiServer();
 		setDevPublicUrl(dev.publicUrl);
+		// Release the Vite listener when tsx watch restarts the backend.
+		for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+			process.once(signal, () => {
+				void dev.close().catch(() => {
+					console.error('[Dev] Failed to stop the UI server.');
+					process.exitCode = 1;
+				});
+			});
+		}
 	}
 
 	// development + PRIVOS_TRANSPORT=relay: run the app-local pairing loop alongside

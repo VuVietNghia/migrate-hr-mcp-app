@@ -37,6 +37,14 @@ function createGateway(overrides: Partial<NangoSdkClient> = {}) {
 }
 
 describe('NangoSdkGateway', () => {
+	it('allows the authenticated Gmail Profile endpoint through the broker', async () => {
+		const { gateway } = createGateway({ proxy: async () => ({ status: 200, data: { emailAddress: 'hr@example.test' } }) });
+		await expect(gateway.proxy({
+			provider: 'google', connectionId: 'connection-a', method: 'GET',
+			endpoint: 'https://gmail.googleapis.com/gmail/v1/users/me/profile', timeoutMs: 8000,
+		})).resolves.toMatchObject({ status: 200, data: { emailAddress: 'hr@example.test' } });
+	});
+
 	it('creates a provider-restricted connect session with server tags', async () => {
 		let body: unknown;
 		const { gateway } = createGateway({

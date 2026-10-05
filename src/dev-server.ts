@@ -14,6 +14,7 @@
  *     binary. If PUBLIC_URL is set, that tunnel is reused and nothing is spawned.
  */
 import { spawn, type ChildProcess } from 'child_process';
+import type { HmrOptions } from 'vite';
 
 const DEFAULT_VITE_PORT = 5179;
 
@@ -70,7 +71,7 @@ function startCloudflaredTunnel(port: number): Promise<{ url: string; proc: Chil
 /** Resolve the public origin + matching Vite HMR config for the chosen transport. */
 async function resolveTransport(
 	port: number,
-): Promise<{ publicUrl: string; hmr: any; allowedHosts: true | string[]; tunnelProc?: ChildProcess }> {
+): Promise<{ publicUrl: string; hmr: HmrOptions; allowedHosts: true | string[]; tunnelProc?: ChildProcess }> {
 	const mode = (process.env.DEV_TUNNEL || 'localhost').toLowerCase();
 
 	if (mode === 'localhost') {
@@ -119,7 +120,7 @@ export async function startDevUiServer(): Promise<DevUiServer> {
 		root: 'src/ui',
 		base: '/ui/',
 		plugins: [(await import('@vitejs/plugin-react')).default()],
-		server: { port, strictPort: true, cors: true, allowedHosts, hmr },
+		server: { host: '0.0.0.0', port, strictPort: true, cors: true, allowedHosts, hmr },
 	});
 	await vite.listen(port);
 	console.log(`[Dev] Vite dev server on http://localhost:${port} — UI served from ${publicUrl}`);

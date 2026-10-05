@@ -115,6 +115,7 @@ function proxyTarget(request: ProxyRequest): { baseUrlOverride: string; endpoint
 	}
 	const allowed = new Set([
 		'https://openidconnect.googleapis.com/v1/userinfo',
+		'https://gmail.googleapis.com/gmail/v1/users/me/profile',
 		'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
 	]);
 	if (!allowed.has(request.endpoint)) throw new MailError('MAIL_CONFIGURATION_UNAVAILABLE');
