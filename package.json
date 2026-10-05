@@ -56,6 +56,7 @@
     "@nangohq/node": "^0.71.10",
     "@privos_ai/app-server": "^0.10.0",
     "docx": "^9.7.1",
+    "docx-preview": "^0.4.1",
     "dotenv": "^17.3.1",
     "gitnexus": "^1.6.12",
     "nodemailer": "^10.0.12",
@@ -65,7 +66,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@privos_ai/app-react": "^0.6.0",
+    "@privos_ai/app-react": "^0.8.0",
     "@types/express": "^5.0.6",
     "@types/nodemailer": "^8.0.2",
     "@types/react": "^18.0.0",

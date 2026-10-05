@@ -1,19 +1,19 @@
-/**
- * Theme provider — syncs with Privos host theme or allows manual override.
- * Modes: 'auto' (follow host dark/light), 'light', 'dark'.
- * Sets data-theme attribute on <html> for CSS targeting.
- * Background colors are defined in CSS per theme — no inline overrides.
- */
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+/** Studio theme state: follow the PrivOS host or use an explicit local palette. */
+import { createContext, useContext, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
+import {
+  normalizeStudioThemeMode,
+  resolveStudioTheme,
+  type StudioResolvedTheme,
+  type StudioThemeMode,
+} from './studio/studio-theme';
 
-type ThemeMode = 'auto' | 'light' | 'dark';
-type ResolvedTheme = 'light' | 'dark';
+const THEME_STORAGE_KEY = 'theme-mode';
 
 interface ThemeContextValue {
-  mode: ThemeMode;
-  resolved: ResolvedTheme;
-  setMode: (mode: ThemeMode) => void;
+  mode: StudioThemeMode;
+  resolved: StudioResolvedTheme;
+  setMode: (mode: StudioThemeMode) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
@@ -33,24 +33,20 @@ interface ThemeProviderProps {
 }
 
 export function ThemeProvider({ children, hostTheme }: ThemeProviderProps) {
-  const [mode, setModeState] = useState<ThemeMode>(() => {
-    try { return (localStorage.getItem('theme-mode') as ThemeMode) || 'auto'; }
+  const [mode, setModeState] = useState<StudioThemeMode>(() => {
+    try { return normalizeStudioThemeMode(localStorage.getItem(THEME_STORAGE_KEY)); }
     catch { return 'auto'; }
   });
 
-  const setMode = useCallback((m: ThemeMode) => {
+  const setMode = useCallback((m: StudioThemeMode) => {
     setModeState(m);
-    try { localStorage.setItem('theme-mode', m); } catch {}
+    try {
+      if (m === 'auto') localStorage.removeItem(THEME_STORAGE_KEY);
+      else localStorage.setItem(THEME_STORAGE_KEY, m);
+    } catch {}
   }, []);
 
-  const hostIsDark = hostTheme === 'dark' || hostTheme === 'high-contrast';
-  const resolved: ResolvedTheme = mode === 'auto'
-    ? (hostIsDark ? 'dark' : 'light')
-    : mode;
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', resolved);
-  }, [resolved]);
+  const resolved = resolveStudioTheme(mode, hostTheme);
 
   return (
     <ThemeContext.Provider value={{ mode, resolved, setMode }}>
@@ -62,18 +58,21 @@ export function ThemeProvider({ children, hostTheme }: ThemeProviderProps) {
 /** Small theme toggle button */
 export function ThemeToggle() {
   const { mode, setMode } = useTheme();
-  const options: { value: ThemeMode; label: string }[] = [
+  const options: { value: StudioThemeMode; label: string }[] = [
     { value: 'auto', label: 'Auto' },
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' },
+    { value: 'brand', label: 'Brand' },
   ];
 
   return (
-    <div className="theme-toggle">
+    <div className="theme-toggle" role="group" aria-label="Giao diện">
       {options.map((o) => (
         <button
+          type="button"
           key={o.value}
           className={`theme-toggle-btn ${mode === o.value ? 'active' : ''}`}
+          aria-pressed={mode === o.value}
           onClick={() => setMode(o.value)}
         >
           {o.label}
