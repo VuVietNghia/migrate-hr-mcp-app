@@ -12,7 +12,9 @@ const defaultReadTextFile: ReadTextFile = (path, encoding) => readFile(path, enc
 
 export class FileMailSecret implements MailSecretReader {
 	constructor(
-		private readonly path = '/run/secrets/nango_api_key',
+		// WSL can select a host file; Docker uses its secret mount by default.
+		// Only the file path is configurable; the key itself is never read from env.
+		private readonly path = process.env.NANGO_SECRET_FILE?.trim() || '/run/secrets/nango_api_key',
 		private readonly readTextFile: ReadTextFile = defaultReadTextFile,
 	) {}
 

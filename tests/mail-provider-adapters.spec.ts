@@ -49,6 +49,39 @@ class FakeGateway implements NangoGateway {
 }
 
 describe('mail provider adapters', () => {
+	it.each([401, 403])('verifies a Gmail-only grant through Gmail Profile after UserInfo returns %s', async status => {
+		const gateway = new FakeGateway(request => request.endpoint === 'https://openidconnect.googleapis.com/v1/userinfo'
+			? { status, data: { error: 'invalid_request' } }
+			: { status: 200, data: { emailAddress: 'hr@example.test' } });
+		await expect(new GoogleMailAdapter(gateway).identity('google-a', 8000)).resolves.toBe('hr@example.test');
+		expect(gateway.requests.map(request => request.endpoint)).toEqual([
+			'https://openidconnect.googleapis.com/v1/userinfo',
+			'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+		]);
+	});
+
+	it('requires reconnection when both Google identity endpoints reject the grant', async () => {
+		const gateway = new FakeGateway(() => ({ status: 401, data: { error: 'invalid_token' } }));
+		await expect(new GoogleMailAdapter(gateway).identity('google-a', 8000)).rejects.toMatchObject({ code: 'MAIL_RECONNECT_REQUIRED' });
+		expect(gateway.requests).toHaveLength(2);
+	});
+
+	it('does not use Gmail Profile after a rate-limited UserInfo response', async () => {
+		const gateway = new FakeGateway(() => ({ status: 429, data: {}, retryAfterSeconds: 12 }));
+		await expect(new GoogleMailAdapter(gateway).identity('google-a', 8000)).rejects.toMatchObject({ code: 'MAIL_RATE_LIMITED', retryAfterSeconds: 12 });
+		expect(gateway.requests).toHaveLength(1);
+	});
+
+	it('does not start a Gmail Profile request after the identity deadline expires', async () => {
+		let now = 1000;
+		const gateway = new FakeGateway(() => {
+			now = 2001;
+			return { status: 401, data: {} };
+		});
+		await expect(new GoogleMailAdapter(gateway, () => now).identity('google-a', 1000)).rejects.toMatchObject({ code: 'MAIL_TIMEOUT_BEFORE_SEND' });
+		expect(gateway.requests).toHaveLength(1);
+	});
+
 	it('builds a Vietnamese Gmail MIME message with the verified sender', async () => {
 		const gateway = new FakeGateway(request => {
 			if (request.method === 'GET') return { status: 200, data: { email: 'hr@example.test', email_verified: true } };

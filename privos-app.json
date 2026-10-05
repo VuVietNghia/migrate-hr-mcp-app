@@ -1,9 +1,9 @@
 {
   "schemaVersion": 3,
   "kind": "mcp-app",
-  "name": "ai.privos.mcp-app-cv-matcher-dev",
+  "name": "ai.privos.mcp-app-demo-hr-hrm-coming-features",
   "version": "3.0.12",
-  "title": "CV Matcher App",
+  "title": "PrivOS HR MCP App Coming Features",
   "description": "HR Mini App for PrivOS: recruitment pipeline with AI CV scoring, scored-CV kanban, JD editor, employee lifecycle, payroll, drafting bot and email history.",
   "icon": "/public/icon.svg",
   "author": {
@@ -128,8 +128,8 @@
     "verifiedActor": true
   },
   "agentBot": {
-    "name": "CV Matcher Assistant",
-    "slug": "cv-matcher-assistant"
+    "name": "CV Matcher Assistant Coming Features",
+    "slug": "cv-matcher-assistant-coming-features"
   },
   "tools": [
     {

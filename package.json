@@ -1,5 +1,5 @@
 {
-  "name": "ai.privos.mcp-app-demo-hr-hrm",
+  "name": "ai.privos.mcp-app-demo-hr-hrm-coming-features",
   "version": "3.0.12",
   "type": "module",
   "private": false,
@@ -33,6 +33,7 @@
   "scripts": {
     "build": "vite build && tsx scripts/generate-manifest.ts && npm run manifest:lint",
     "dev": "PRIVOS_TRANSPORT=relay PRIVOS_DEV_UI=1 tsx src/server.ts",
+    "dev:local": "NANGO_SECRET_FILE=./docker-data/secrets/nango_api_key PRIVOS_DEV_UI=1 CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=500 tsx watch --exclude 'src/ui/**' --exclude 'dist/**' --exclude 'docker-data/**' --exclude 'privos-standalone-identity*.json' src/server.ts",
     "start": "tsx src/server.ts",
     "pair": "tsx scripts/pair.ts",
     "start:relay": "PRIVOS_TRANSPORT=relay npm start",
@@ -40,6 +41,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:strict-unused": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "test": "vitest run",
+    "test:watch": "CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=500 vitest",
     "verify:fast-pr": "npm run typecheck:strict-unused && npm run test && npm run build && npm run preflight",
     "manifest:lint": "privos-app lint privos-app.json",
     "preflight": "tsx scripts/preflight.ts",
