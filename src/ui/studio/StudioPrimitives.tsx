@@ -1,4 +1,9 @@
-import { useId, type HTMLAttributes, type ReactNode } from 'react';
+import {
+  useId,
+  type HTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+} from 'react';
 
 type StudioTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 
@@ -73,6 +78,49 @@ export function StudioCard({
       ) : null}
       <div className="studio-card__body">{children}</div>
     </section>
+  );
+}
+
+interface StudioPrefixInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'prefix'> {
+  prefix: ReactNode;
+  wrapperClassName?: string;
+}
+
+export function StudioPrefixInput({
+  prefix,
+  wrapperClassName,
+  className,
+  ...inputProps
+}: StudioPrefixInputProps) {
+  return (
+    <span className={classes('studio-prefix-input', wrapperClassName)}>
+      <span className="studio-prefix-input__prefix" aria-hidden="true">
+        {prefix}
+      </span>
+      <input className={className} {...inputProps} />
+    </span>
+  );
+}
+
+interface StudioSearchInputProps extends InputHTMLAttributes<HTMLInputElement> {
+  icon?: ReactNode;
+  label: string;
+  wrapperClassName?: string;
+}
+
+export function StudioSearchInput({
+  icon,
+  label,
+  wrapperClassName,
+  className,
+  ...inputProps
+}: StudioSearchInputProps) {
+  return (
+    <label className={classes('studio-search-input', wrapperClassName)}>
+      {icon ? <span className="studio-search-input__icon" aria-hidden="true">{icon}</span> : null}
+      <span className="studio-sr-only">{label}</span>
+      <input className={className} {...inputProps} />
+    </label>
   );
 }
 

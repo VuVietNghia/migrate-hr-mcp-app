@@ -40,12 +40,16 @@ import {
   type CompanyPreviewState,
 } from './company/company-preview-state';
 import { CompanyDocxPreview } from './company/CompanyDocxPreview';
+import { CompanyMarkdownPreview } from './company/CompanyMarkdownPreview';
+import { CompanyPdfPreview } from './company/CompanyPdfPreview';
 import {
   StudioCard,
   StudioDialog,
   StudioInlineState,
   StudioPage,
   StudioPageHeader,
+  StudioPrefixInput,
+  StudioSearchInput,
 } from './studio/StudioPrimitives';
 
 const ACCEPTED_DOCUMENTS = '.pdf,.doc,.docx,.txt,.md,.ppt,.pptx,.csv,.json,.png,.jpg,.jpeg,.webp';
@@ -154,7 +158,7 @@ export default function CompanyHome() {
       return;
     }
     const kind = classifyCompanyDocument(selectedDocument);
-    if (kind !== 'image' && kind !== 'pdf') {
+    if (kind !== 'image') {
       setPreviewObjectUrl(null);
       return;
     }
@@ -188,15 +192,17 @@ export default function CompanyHome() {
     event.preventDefault();
     if (!roomId || !website.trim() || isProcessingWebsite) return;
 
+    const websiteUrl = `https://${website.trim()}`;
+
     setIsProcessingWebsite(true);
     setWebsiteStatus('Đang gửi website cho AI đọc...');
     setWebsiteError('');
 
     try {
-      const prompt = `[SYSTEM AUTOMATION] EXECUTE NOW. DO NOT ASK FOLLOW-UP QUESTIONS.\nYou are a crawler agent for an HR mini app. Read this official company website: ${website}\n\nSummarize the company's information in detail in Markdown format. Include sections such as Overview, Industry, Products/Services, Culture, Contact, etc. if available.\nDo not wrap your response in markdown code blocks, just output the raw markdown text.`;
+      const prompt = `[SYSTEM AUTOMATION] EXECUTE NOW. DO NOT ASK FOLLOW-UP QUESTIONS.\nYou are a crawler agent for an HR mini app. Read this official company website: ${websiteUrl}\n\nSummarize the company's information in detail in Markdown format. Include sections such as Overview, Industry, Products/Services, Culture, Contact, etc. if available.\nDo not wrap your response in markdown code blocks, just output the raw markdown text.`;
       const markdownContent = await askCrawlAgent(app, roomId, prompt);
       setWebsiteStatus('Đang lưu kết quả...');
-      const fileName = `${getHostName(website)}-data.md`;
+      const fileName = `${getHostName(websiteUrl)}-data.md`;
       await createOrUpdateFile(app, `${roomId}/hr-miniapp/company/${fileName}`, markdownContent);
       setWebsiteStatus(`Đã lưu ${fileName} vào thư viện tài liệu.`);
       setWebsite('');
@@ -251,7 +257,7 @@ export default function CompanyHome() {
     if (event.target.files) addFiles(event.target.files);
   };
 
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     setIsDragging(false);
     if (event.dataTransfer.files.length) addFiles(event.dataTransfer.files);
@@ -326,66 +332,74 @@ export default function CompanyHome() {
       </section>
 
       <div className="company-source-grid">
-        <StudioCard
-          className="company-source-card"
-          title={<><span className="company-step">01</span> Thu thập từ Website</>}
-          description="AI đọc website chính thức và lưu bản tóm tắt Markdown vào Room Files."
-        >
+        <StudioCard className="company-source-card">
+          <div className="company-source-card__heading">
+            <span className="company-step">01</span>
+            <div>
+              <h2>Thu thập từ website</h2>
+              <p>Biến thông tin công khai thành bối cảnh có cấu trúc.</p>
+            </div>
+          </div>
           <form className="company-form" onSubmit={handleCrawlWebsite}>
             <label className="company-field" htmlFor="company-website">
-              <span>Link website công ty</span>
-              <span className="company-url-input">
-                <GlobalOutlined aria-hidden />
-                <input
-                  id="company-website"
-                  type="url"
-                  required
-                  value={website}
-                  onChange={(event) => setWebsite(event.target.value)}
-                  placeholder="https://company.com"
-                  disabled={isProcessingWebsite}
-                />
-              </span>
+              <span>Website công ty</span>
+              <StudioPrefixInput
+                id="company-website"
+                type="text"
+                inputMode="url"
+                required
+                prefix="https://"
+                wrapperClassName="company-url-input"
+                value={website}
+                onChange={(event) => setWebsite(event.target.value.replace(/^https?:\/\//i, ''))}
+                placeholder="company.com"
+                disabled={isProcessingWebsite}
+              />
             </label>
-            <button type="submit" className="studio-button studio-button--primary" disabled={isProcessingWebsite || !website.trim()}>
-              <GlobalOutlined aria-hidden />
-              {isProcessingWebsite ? 'Đang đọc website...' : 'Đọc & lưu dữ liệu'}
-            </button>
+            <div className="company-source-card__footer">
+              <span className="company-source-card__hint">AI tổng hợp và lưu thành tài liệu Markdown.</span>
+              <button type="submit" className="studio-button studio-button--primary company-source-card__action" disabled={isProcessingWebsite || !website.trim()}>
+                <GlobalOutlined aria-hidden />
+                {isProcessingWebsite ? 'Đang đọc website...' : 'Đọc & lưu thông tin'}
+              </button>
+            </div>
             {websiteStatus ? <StudioInlineState tone={isProcessingWebsite ? 'warning' : 'success'}>{websiteStatus}</StudioInlineState> : null}
             {websiteError ? <StudioInlineState tone="danger">{websiteError}</StudioInlineState> : null}
           </form>
         </StudioCard>
 
-        <StudioCard
-          className="company-source-card"
-          title={<><span className="company-step">02</span> Tải lên tài liệu</>}
-          description="Bổ sung PDF, Word, Markdown hoặc hình ảnh dùng trong các luồng nhân sự."
-        >
+        <StudioCard className="company-source-card">
+          <div className="company-source-card__heading">
+            <span className="company-step">02</span>
+            <div>
+              <h2>Bổ sung tài liệu</h2>
+              <p>Hồ sơ công ty, văn hóa và chính sách nội bộ.</p>
+            </div>
+          </div>
           <form className="company-form" onSubmit={handleUploadDocs}>
-            <div
+            <label
               className={`company-dropzone${isDragging ? ' company-dropzone--dragging' : ''}`}
               onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
               onDragOver={(event) => event.preventDefault()}
               onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setIsDragging(false); }}
               onDrop={handleDrop}
+              aria-disabled={isUploadingDocs}
             >
               <InboxOutlined aria-hidden />
-              <strong>Kéo & thả tài liệu vào đây</strong>
-              <span>hoặc</span>
-              <button type="button" className="company-dropzone__link" onClick={() => fileInputRef.current?.click()} disabled={isUploadingDocs}>
-                chọn tệp từ thiết bị
-              </button>
-              <small>PDF, Word, Text, Markdown, PowerPoint và hình ảnh</small>
+              <strong>Chọn tài liệu hoặc thả tệp vào đây</strong>
+              <small>PDF, Word, Markdown, PowerPoint và hình ảnh</small>
+              <span className="company-dropzone__link">Chọn tệp</span>
               <input
                 ref={fileInputRef}
                 type="file"
                 multiple
                 hidden
+                disabled={isUploadingDocs}
                 accept={ACCEPTED_DOCUMENTS}
                 aria-label="Chọn tài liệu công ty"
                 onChange={handleFileChange}
               />
-            </div>
+            </label>
             {selectedFiles.length ? (
               <ul className="company-selected-files" aria-label={`${selectedFiles.length} tệp đã chọn`}>
                 {selectedFiles.map((file) => (
@@ -400,10 +414,15 @@ export default function CompanyHome() {
                 ))}
               </ul>
             ) : null}
-            <button type="submit" className="studio-button studio-button--primary" disabled={isUploadingDocs || selectedFiles.length === 0}>
-              <UploadOutlined aria-hidden />
-              {isUploadingDocs ? 'Đang tải lên...' : `Tải lên${selectedFiles.length ? ` ${selectedFiles.length} tệp` : ''}`}
-            </button>
+            {selectedFiles.length ? (
+              <div className="company-source-card__footer">
+                <span className="company-source-card__hint">{selectedFiles.length} tệp sẵn sàng tải lên.</span>
+                <button type="submit" className="studio-button studio-button--primary company-source-card__action company-upload-submit" disabled={isUploadingDocs}>
+                  <UploadOutlined aria-hidden />
+                  {isUploadingDocs ? 'Đang tải lên...' : `Tải lên ${selectedFiles.length} tệp`}
+                </button>
+              </div>
+            ) : null}
             {docStatus ? <StudioInlineState tone={isUploadingDocs ? 'warning' : 'success'}>{docStatus}</StudioInlineState> : null}
             {docError ? <StudioInlineState tone="danger">{docError}</StudioInlineState> : null}
           </form>
@@ -415,11 +434,14 @@ export default function CompanyHome() {
         title={<>Thư viện tài liệu <span className="company-document-count">{documents.length} tài liệu</span></>}
         description="Tài liệu hiện có trong Room, sắp xếp theo thời điểm cập nhật mới nhất."
         actions={
-          <label className="company-search">
-            <SearchOutlined aria-hidden />
-            <span className="studio-sr-only">Tìm tài liệu</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tài liệu" />
-          </label>
+          <StudioSearchInput
+            label="Tìm tài liệu"
+            icon={<SearchOutlined />}
+            wrapperClassName="company-search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Tìm tài liệu"
+          />
         }
       >
         {documentsLoading ? <StudioInlineState tone="info">Đang tải thư viện tài liệu...</StudioInlineState> : null}
@@ -514,10 +536,11 @@ export default function CompanyHome() {
           </StudioInlineState>
         ) : null}
         {!preview.loading && !preview.error && selectedDocument ? (
-          classifyCompanyDocument(selectedDocument) === 'text' ? <pre className="company-text-preview">{preview.text}</pre>
+          describeCompanyDocumentFormat(selectedDocument).id === 'markdown' ? <CompanyMarkdownPreview content={preview.text || ''} />
+            : classifyCompanyDocument(selectedDocument) === 'text' ? <pre className="company-text-preview">{preview.text}</pre>
             : describeCompanyDocumentFormat(selectedDocument).id === 'word' && preview.blob ? <CompanyDocxPreview blob={preview.blob} />
               : classifyCompanyDocument(selectedDocument) === 'image' && previewObjectUrl ? <img className="company-image-preview" src={previewObjectUrl} alt={selectedDocument.name} />
-                : classifyCompanyDocument(selectedDocument) === 'pdf' && previewObjectUrl ? <iframe className="company-pdf-preview" src={previewObjectUrl} title={selectedDocument.name} />
+                : classifyCompanyDocument(selectedDocument) === 'pdf' && preview.blob ? <CompanyPdfPreview blob={preview.blob} />
                   : <StudioInlineState>Không có bản xem trước cho định dạng này.</StudioInlineState>
         ) : null}
       </StudioDialog>

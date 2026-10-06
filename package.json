@@ -28,7 +28,7 @@
     "url": "https://github.com/PrivOS-AI/privos-mcp-app-demo"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "build": "vite build && tsx scripts/generate-manifest.ts && npm run manifest:lint",
@@ -60,6 +60,9 @@
     "dotenv": "^17.3.1",
     "gitnexus": "^1.6.12",
     "nodemailer": "^10.0.12",
+    "pdfjs-dist": "^6.3.289",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tsx": "^4.0.0",
     "ws": "^8.21.0",
     "xlsx": "^0.18.5",

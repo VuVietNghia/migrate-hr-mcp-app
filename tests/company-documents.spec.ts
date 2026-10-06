@@ -95,6 +95,64 @@ describe('CompanyDocumentRepository', () => {
       timeoutMs: 60_000,
     });
   });
+
+  it('decodes the binary envelope returned by hosts that do not convert it to a Blob', async () => {
+    const rest = vi.fn(async () => ({
+      statusCode: 200,
+      body: {
+        result: {
+          dataBase64: 'ZG9jdW1lbnQgYnl0ZXM=',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          fileName: 'policy.docx',
+          size: 14,
+        },
+      },
+    }));
+    const repository = new CompanyDocumentRepository({ rest } as unknown as McpApp, 'room-1');
+
+    const result = await repository.readBlob({ id: 'file-1', name: 'fallback.docx' });
+
+    expect(await result.blob.text()).toBe('document bytes');
+    expect(result.blob.type).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    expect(result.fileName).toBe('policy.docx');
+  });
+
+  it('decodes a binary envelope after the host unwraps the REST result field', async () => {
+    const rest = vi.fn(async () => ({
+      statusCode: 200,
+      body: {
+        dataBase64: 'cGRmIGJ5dGVz',
+        mimeType: 'application/pdf',
+        fileName: 'policy.pdf',
+        size: 9,
+      },
+    }));
+    const repository = new CompanyDocumentRepository({ rest } as unknown as McpApp, 'room-1');
+
+    const result = await repository.readBlob({ id: 'file-2', name: 'fallback.pdf' });
+
+    expect(await result.blob.text()).toBe('pdf bytes');
+    expect(result.blob.type).toBe('application/pdf');
+    expect(result.fileName).toBe('policy.pdf');
+  });
+
+  it('decodes the result-only response returned by the PrivOS host bridge', async () => {
+    const rest = vi.fn(async () => ({
+      result: {
+        dataBase64: 'ZGlyZWN0IGJ5dGVz',
+        mimeType: 'application/pdf',
+        fileName: 'direct.pdf',
+        size: 12,
+      },
+    }));
+    const repository = new CompanyDocumentRepository({ rest } as unknown as McpApp, 'room-1');
+
+    const result = await repository.readBlob({ id: 'file-3', name: 'fallback.pdf' });
+
+    expect(await result.blob.text()).toBe('direct bytes');
+    expect(result.blob.type).toBe('application/pdf');
+    expect(result.fileName).toBe('direct.pdf');
+  });
 });
 
 describe('Company document model', () => {

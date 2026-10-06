@@ -29,4 +29,12 @@ describe('CreateDetailedProfileForm position select', () => {
     expect(options[0]).toEqual({ value: 'KE TOAN', label: 'KE TOAN' });
     expect(options).toHaveLength(POSITION_OPTIONS.length + 1);
   });
+
+  it('keeps the standard list when the current position already exists', () => {
+    expect(withCurrentOption(POSITION_OPTIONS, 'Developer')).toBe(POSITION_OPTIONS);
+  });
+
+  it('keeps the standard list when the current position is empty', () => {
+    expect(withCurrentOption(POSITION_OPTIONS, '')).toBe(POSITION_OPTIONS);
+  });
 });

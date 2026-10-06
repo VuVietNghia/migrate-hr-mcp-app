@@ -105,6 +105,35 @@ function readString(record: Record<string, unknown>, ...keys: string[]): string 
   return undefined;
 }
 
+function decodeBinaryEnvelope(
+  body: unknown,
+  fallbackMimeType: string,
+  fallbackFileName: string,
+): CompanyDocumentBlob | undefined {
+  const envelope = asRecord(body);
+  const result = envelope ? asRecord(envelope.result) ?? envelope : undefined;
+  if (!result || typeof result.dataBase64 !== 'string') return undefined;
+
+  let binary: string;
+  try {
+    binary = atob(result.dataBase64);
+  } catch {
+    throw new Error('Máy chủ trả về dữ liệu tệp không hợp lệ.');
+  }
+
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return {
+    blob: new Blob([bytes], {
+      type: readString(result, 'mimeType') || fallbackMimeType || 'application/octet-stream',
+    }),
+    fileName: readString(result, 'fileName') || fallbackFileName,
+  };
+}
+
 function readSize(record: Record<string, unknown>): number | undefined {
   const value = record.size ?? record.file_size;
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -165,15 +194,23 @@ export class CompanyDocumentRepository {
       responseType: 'blob',
       timeoutMs: 60_000,
     });
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw new Error(`Không thể tải tài liệu (HTTP ${response.statusCode}).`);
+    const responseRecord = asRecord(response);
+    const statusCode = responseRecord?.statusCode;
+    if (typeof statusCode === 'number' && (statusCode < 200 || statusCode >= 300)) {
+      throw new Error(`Không thể tải tài liệu (HTTP ${statusCode}).`);
     }
-    if (!(response.body instanceof Blob)) {
-      throw new Error('Máy chủ không trả về dữ liệu tệp hợp lệ.');
+    const responseBody = responseRecord?.body;
+    const responseFileName = responseRecord ? readString(responseRecord, 'fileName') : undefined;
+    if (responseBody instanceof Blob) {
+      return {
+        blob: responseBody,
+        fileName: responseFileName || document.name,
+      };
     }
-    return {
-      blob: response.body,
-      fileName: response.fileName?.trim() || document.name,
-    };
+    const fallbackFileName = responseFileName || document.name;
+    const decoded = decodeBinaryEnvelope(responseBody, document.mimeType || '', fallbackFileName)
+      ?? decodeBinaryEnvelope(response, document.mimeType || '', fallbackFileName);
+    if (decoded) return decoded;
+    throw new Error('Máy chủ không trả về dữ liệu tệp hợp lệ.');
   }
 }

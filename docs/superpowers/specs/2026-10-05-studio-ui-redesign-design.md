@@ -2,6 +2,129 @@
 
 Ngày: 2026-10-05. Không commit theo quy ước của repository.
 
+## 0. Trạng thái bàn giao
+
+Cập nhật gần nhất: 2026-10-06. Phần dưới đây là trạng thái triển khai thực tế để phiên làm việc tiếp theo tiếp tục từ đúng điểm dừng; các mục thiết kế còn lại trong tài liệu vẫn giữ nguyên hiệu lực.
+
+### 0.1. Đã hoàn thành và đã được người dùng nghiệm thu
+
+#### Studio Shell dùng chung
+
+- Đã bọc workspace hiện tại trong **StudioShell**, dùng context thật của PrivOS cho Room, người dùng và quyền.
+- Đã triển khai sidebar theo nhóm chức năng, topbar, breadcrumb, mobile navigation và vùng nội dung responsive trong iframe.
+- Sidebar vẫn cuộn được nhưng không hiển thị thanh scrollbar.
+- Navigation đã hiển thị tab **Lương & thanh toán** theo quyền hiện có.
+- Nhãn điều hướng **CV đã chấm** đã đổi thành **Ứng viên**. Đây mới là thay đổi nhãn/route; phần thiết kế nghiệp vụ một Kanban theo đợt ở mục 5 chưa hoàn tất.
+- Không đưa thanh PROTOTYPE, persona, dữ liệu Aster Studio hoặc dữ liệu giả của preview vào production.
+
+Các file nền tảng chính:
+
+- src/ui/studio/StudioShell.tsx
+- src/ui/studio/studio-navigation.ts
+- src/ui/studio/studio-theme.ts
+- src/ui/theme-provider.tsx
+- src/ui/studio/studio.css
+
+#### Theme và font
+
+- Đã triển khai **ThemeMode = auto | light | dark | brand**.
+- Auto bám theme host; Light, Dark và Brand dùng semantic token của Studio và không remount feature screen khi đổi theme.
+- Lựa chọn theme được lưu cục bộ; chọn Auto xóa override và quay lại theme host.
+- Đã nhúng trực tiếp bộ font Montserrat của ui-ux-preview với các weight 400, 500 và 600 tại src/ui/studio/privos-fonts.css; không phụ thuộc CDN.
+- Studio Shell và các control bên trong dùng Montserrat với fallback "Segoe UI", Arial, sans-serif, giúp chữ tiếng Việt khớp bản redesign.
+
+#### Primitive/component dùng chung
+
+Đã có các component dùng chung trong src/ui/studio/StudioPrimitives.tsx:
+
+- StudioPage
+- StudioPageHeader
+- StudioCard
+- StudioInlineState
+- StudioToast
+- StudioDialog
+- StudioPrefixInput
+- StudioSearchInput
+
+StudioPrefixInput và StudioSearchInput giữ các props native của input để feature screen tái sử dụng mà không thay đổi state hoặc handler nghiệp vụ. Style focus/hover nằm ở lớp Studio chung, không nằm riêng trong trang Công ty.
+
+#### Trang Dữ liệu công ty
+
+Trang này đã hoàn tất, được kiểm tra trực tiếp trên PrivOS và được người dùng xác nhận **ok**.
+
+- Đã chuyển sang layout Studio với context Room thật, hero, hai source card và thư viện tài liệu.
+- Luồng đọc website giữ API/handler cũ; UI dùng tiền tố cố định **https://**, tự loại bỏ protocol nếu người dùng dán URL đầy đủ và lưu kết quả Markdown vào đúng thư mục Room.
+- Tiền tố **https://** không đổi màu, nền, border, shadow hoặc vị trí khi hover.
+- Focus website bao quanh toàn bộ prefix + input nhưng không đổi màu border gốc.
+- Thanh **Tìm tài liệu** không có hover/focus decoration ngoài ý muốn.
+- Upload hỗ trợ chọn nhiều tệp và kéo thả; danh sách tệp chờ tải không còn làm giãn chữ/tên tệp.
+- Thư viện nhận dạng và trình bày định dạng:
+  - Markdown màu xanh dương nhạt;
+  - DOCX/Word màu xanh dương đậm;
+  - PDF màu cam;
+  - định dạng không xác định dùng nhãn trung tính rõ ràng.
+- Xem và tải xuống dùng authenticated PrivOS content route thay vì URL tệp không hợp lệ.
+- DOCX được xem trực tiếp trong popup bằng docx-preview.
+- PDF được render trong app bằng pdfjs-dist, fit theo chiều rộng popup và chỉ render các trang gần viewport.
+- Markdown được render bằng react-markdown + remark-gfm, có typography cho heading, list, bảng, blockquote, code và link an toàn.
+- Popup DOCX/PDF/Markdown chỉ cuộn vùng nội dung bên trong; không còn hai scrollbar cạnh nhau.
+- Có guard request generation để kết quả preview cũ không ghi đè tài liệu vừa chọn.
+
+Các module chính của trang:
+
+- src/ui/company-home.tsx
+- src/ui/company/company-documents.ts
+- src/ui/company/company-preview-state.ts
+- src/ui/company/CompanyDocxPreview.tsx
+- src/ui/company/CompanyPdfPreview.tsx
+- src/ui/company/CompanyMarkdownPreview.tsx
+
+### 0.2. Kiểm thử và triển khai gần nhất
+
+Kết quả xác minh ngày 2026-10-06:
+
+- tests/company-home-studio.spec.ts: 13/13 test đạt.
+- npm run typecheck:strict-unused: đạt.
+- npm run build: đạt; manifest lint hợp lệ.
+- Đã build bundle production, cập nhật image privos-mcp-app-demo:local, recreate riêng service hr-app và xác minh bundle mới xuất hiện trên trang PrivOS.
+- Đã smoke test trực tiếp: Studio Shell, font Montserrat, hai component input dùng chung, focus website và thư viện tài liệu đều xuất hiện trong live DOM.
+
+Full npm test hiện còn đúng 4 lỗi không phát sinh từ phần Công ty:
+
+1. Hai lỗi tests/manifest.spec.ts do identity/package sau lần pull chưa đồng bộ.
+2. Hai lỗi tests/packaging.spec.ts vì môi trường Windows hiện tại không có /bin/bash.
+
+Container kết nối relay và phục vụ MCP/giao diện bình thường, nhưng healthcheck /ready hiện trả 503 nên Docker hiển thị **unhealthy**. Chưa thay đổi readiness trong phạm vi redesign; phiên sau cần coi đây là một vấn đề hạ tầng/runtime riêng nếu người dùng yêu cầu xử lý.
+
+Các test liên quan đã được bổ sung:
+
+- tests/app-studio-shell.spec.ts
+- tests/studio-navigation.spec.ts
+- tests/studio-shell-layout.spec.ts
+- tests/studio-theme.spec.ts
+- tests/studio-primitives.spec.ts
+- tests/company-documents.spec.ts
+- tests/company-home-studio.spec.ts
+- tests/company-markdown-preview.spec.ts
+- tests/company-pdf-preview.spec.ts
+
+### 0.3. Chưa hoàn thành
+
+- Chưa redesign các feature screen theo thứ tự còn lại: Tuyển dụng, Pipeline, Ứng viên, Trợ lý JD, Nhân sự/Vòng đời nhân sự, Bảng lương, Email và Soạn thảo.
+- Trang **Ứng viên** chưa thực hiện selector đợt tuyển dụng, newest-by-creation-time, chỉ tải/poll một list đang chọn và chỉ hiển thị một Kanban. Không được coi việc đổi nhãn navigation là hoàn thành mục 5 hoặc 6.4.
+- src/ui/cv-scored/cv-list-presence.ts vẫn ưu tiên updatedAt/updated_at; logic này chưa đáp ứng quy tắc creation time trong mục 5.1 và phải được sửa khi bắt đầu trang Ứng viên.
+- Navigation intent dùng chung giữa Tuyển dụng, Pipeline, Ứng viên, Trợ lý JD và Nhân sự chưa được triển khai đầy đủ.
+- Full verification gate chưa xanh vì bốn lỗi môi trường/cấu hình đã ghi tại mục 0.2.
+
+### 0.4. Điểm bắt đầu cho phiên tiếp theo
+
+1. Giữ nguyên toàn bộ worktree đang có; không reset hoặc ghi đè các thay đổi chưa commit.
+2. Không commit/push nếu người dùng chưa yêu cầu.
+3. Bắt đầu trang **Tuyển dụng** theo thứ tự tại mục 8, trừ khi người dùng chỉ định màn hình khác.
+4. Đọc lại ui-ux-preview và tài liệu privos-dev-docs cho feature chuẩn bị sửa; giữ nguyên service/repository và luồng nghiệp vụ đang chạy.
+5. Tái sử dụng Studio Shell, token và primitive hiện có; chỉ thêm component dùng chung khi có contract trình bày rõ ràng.
+6. Sau khi hoàn tất một trang, chạy test/typecheck/build phù hợp, triển khai để người dùng kiểm tra và dừng chờ xác nhận trước khi sang trang tiếp theo.
+
 ## 1. Mục tiêu
 
 Chuyển giao diện hiện tại sang ngôn ngữ thiết kế A · Studio trong `ui-ux-preview`, đồng thời giữ nguyên các luồng nghiệp vụ đang hoạt động của CV Matcher. Bản production dùng dữ liệu và API thật của PrivOS; không đưa dữ liệu giả hoặc công cụ điều khiển prototype vào ứng dụng.
