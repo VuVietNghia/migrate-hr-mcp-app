@@ -7,6 +7,10 @@ import { getCvPipelineDisplayReason } from './cv-pipeline-display-reason';
 import { createOrUpdateFile, describeFeatureError, readRoomFileText } from './privos-rest';
 import { readParsedDocumentText } from './parsed-cv-text';
 import { usePolling } from './hooks/usePolling';
+import {
+  resolveIntentJD,
+  type StudioNavigationIntent,
+} from './studio/studio-navigation-intent';
 
 type JdLoadStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -49,6 +53,7 @@ interface PipelineDashboardProps {
   serviceFactory?: (app: ReturnType<typeof usePrivosApp>, roomId: string) => IPipelineService;
   /** True only while this tab is the visible one — polling is gated on it. */
   active?: boolean;
+  navigationIntent?: StudioNavigationIntent | null;
 }
 
 type JDFormState = {
@@ -449,7 +454,7 @@ function renderFormattedMarkdown(mdText: string) {
 
 // Main Component
 
-export default function PipelineDashboard({ serviceFactory, active = false }: PipelineDashboardProps = {}) {
+export default function PipelineDashboard({ serviceFactory, active = false, navigationIntent = null }: PipelineDashboardProps = {}) {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
 
@@ -484,6 +489,7 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
   const toastTimerRef = useRef<number | null>(null);
   const jdDropdownRef = useRef<HTMLDivElement>(null);
   const serviceRef = useRef<IPipelineService | null>(null);
+  const handledNavigationSequenceRef = useRef(0);
 
   const loadJdContent = async (name: string, fileId?: string) => {
     if (!name) return '';
@@ -828,6 +834,24 @@ export default function PipelineDashboard({ serviceFactory, active = false }: Pi
     setJdContent('');
     await loadJdContent(jdFile.name, jdFile._id);
   };
+
+  useEffect(() => {
+    if (!active || !navigationIntent || navigationIntent.target !== 'pipeline') return;
+    if (handledNavigationSequenceRef.current >= navigationIntent.sequence) return;
+    handledNavigationSequenceRef.current = navigationIntent.sequence;
+
+    const applyIntent = async () => {
+      const currentJDs = await loadJDs();
+      const target = resolveIntentJD(navigationIntent, 'pipeline', currentJDs);
+      if (!target) {
+        showToast('JD đã bị xóa hoặc bạn không còn quyền đọc file này. Hãy chọn lại một JD.', 'error');
+        return;
+      }
+      await handleSelectJD(target._id, currentJDs);
+    };
+
+    void applyIntent();
+  }, [active, navigationIntent?.sequence]);
 
   const handleGenerateJD = async () => {
     if (!jdPrompt.trim() || !serviceRef.current?.askAI) return;

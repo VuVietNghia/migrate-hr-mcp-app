@@ -152,7 +152,7 @@ bypasses the snapshot path entirely (HMR, no Refresh, no version bump).
 
 - **UI split into a shell + hashed assets, adopting `@privos_ai/app-server`'s `serveBuiltUi`
   helper (`^0.10.0`).** The whole 549 KB single-chunk bundle (`ai.privos.mcp-app-demo` 2.15.1,
-  see `tests/fixtures/ui-inline-2.15.1.html` for the exact byte-for-byte inlined page this
+  whose archived fixture was removed after the migration and which this release
   replaces) is no longer inlined into the `ui://…/form.html` resource on every `resources/read`.
   Instead the Hub reads a small shell (< 4 KB: relay opt-in meta + boot watchdog + relative
   `./assets/…` tags) plus the code-split, content-hashed `assets/` files it references, addressed

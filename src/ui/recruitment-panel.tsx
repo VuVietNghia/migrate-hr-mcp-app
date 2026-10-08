@@ -1,8 +1,23 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
+import {
+  ApartmentOutlined,
+  ArrowRightOutlined,
+  BulbOutlined,
+  ClockCircleOutlined,
+  EditOutlined,
+  EnvironmentOutlined,
+  FileTextOutlined,
+  LeftOutlined,
+  PlusOutlined,
+  RightOutlined,
+  SearchOutlined,
+  TeamOutlined,
+} from '@ant-design/icons';
+
+import { MarkdownPathContextBuilder } from './cv-context-builder';
 import { createOrUpdateFile, readRoomFileText } from './privos-rest';
 import { PipelineService } from './pipeline-service';
-import { MarkdownPathContextBuilder } from './cv-context-builder';
 import {
   RecruitmentDepartmentForm,
   RecruitmentDepartmentRenameForm,
@@ -13,406 +28,396 @@ import {
   createRecruitmentRoomOperation,
   isRecruitmentDepartmentRenameable,
   mergeRecruitmentDepartments,
-  resolveJdDepartment,
+  type RecruitmentDepartment,
 } from './recruitment-departments';
+import {
+  RecruitmentJobDetailDialog,
+  RecruitmentJobFormDialog,
+} from './recruitment/RecruitmentJobDialogs';
+import {
+  EMPTY_RECRUITMENT_JOB_DRAFT,
+  buildRecruitmentJobDocument,
+  filterRecruitmentJobs,
+  getInitialJobDepartmentKey,
+  getRecruitmentEmptyState,
+  paginateRecruitmentJobs,
+  parseRecruitmentJob,
+  type RecruitmentJob,
+  type RecruitmentJobDraft,
+} from './recruitment/recruitment-jobs';
+import { readRecruitmentJobDownload } from './recruitment/recruitment-job-download';
+import { loadEvaluatedCandidateCount } from './recruitment/recruitment-metrics';
+import {
+  StudioInlineState,
+  StudioMetricCard,
+  StudioPage,
+  StudioPageHeader,
+  StudioSearchInput,
+} from './studio/StudioPrimitives';
+import type { AppTab } from './studio/studio-navigation';
+import type { StudioNavigationIntent } from './studio/studio-navigation-intent';
 
-type Department = string;
-
-interface Job {
-  title: string;
-  type: string;
-  salary: string;
-  summary: string;
-  responsibilities: string[];
-  
-  // Old format compatibility
-  requirements?: string[];
-  bonuses?: string[];
-
-  // New format
-  location?: string;
-  req_experience?: string[];
-  req_professional?: string[];
-  req_soft?: string[];
-  req_education?: string[];
-  benefits?: string[];
-  contact_email?: string;
-  contact_title?: string;
+interface RecruitmentPanelProps {
+  active: boolean;
+  onNavigate: (target: AppTab, context?: Pick<StudioNavigationIntent, 'jd'>) => void;
 }
 
-interface JobDraft {
-  title: string;
-  type: string;
-  salary: string;
-  location: string;
-  summary: string;
-  responsibilities: string;
-  req_experience: string;
-  req_professional: string;
-  req_soft: string;
-  req_education: string;
-  benefits: string;
-  contact_email: string;
-  contact_title: string;
+type DepartmentFilter = 'all' | string;
+
+const DEFAULT_DEPARTMENTS = DEFAULT_RECRUITMENT_DEPARTMENTS.map((item) => ({ ...item }));
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-const EMPTY_DRAFT: JobDraft = {
-  title: '',
-  type: '',
-  salary: '',
-  location: '',
-  summary: '',
-  responsibilities: '',
-  req_experience: '',
-  req_professional: '',
-  req_soft: '',
-  req_education: '',
-  benefits: '',
-  contact_email: '',
-  contact_title: '',
-};
-
-
-const IT_JOBS: Job[] = [];
-
-const DEFAULT_DEPARTMENT_TABS = DEFAULT_RECRUITMENT_DEPARTMENTS.map(({ key, label }) => ({
-  id: key,
-  label,
-}));
-
-function splitLines(value: string) {
-  return value.split('\n').map((item) => item.trim()).filter(Boolean);
+export function recruitmentJobNavigationContext(job: RecruitmentJob): Pick<StudioNavigationIntent, 'jd'> {
+  return { jd: { fileId: job.fileId, fileName: job.fileName } };
 }
 
-export default function RecruitmentPanel() {
+export function resolveJobDetailAfterTabActivityChange(
+  active: boolean,
+  selectedJob: RecruitmentJob | null,
+): RecruitmentJob | null {
+  return active ? selectedJob : null;
+}
+
+interface RecruitmentJobPagerProps {
+  page: number;
+  pageCount: number;
+  onPageChange: (page: number) => void;
+}
+
+export function RecruitmentJobPager({ page, pageCount, onPageChange }: RecruitmentJobPagerProps) {
+  if (pageCount <= 1) return null;
+
+  return (
+    <nav className="recruitment-studio-pagination" aria-label="Phân trang vị trí tuyển dụng">
+      <button
+        type="button"
+        className="studio-icon-button"
+        aria-label="Trang trước"
+        disabled={page <= 0}
+        onClick={() => onPageChange(page - 1)}
+      >
+        <LeftOutlined />
+      </button>
+      <span aria-live="polite">Trang {page + 1} / {pageCount}</span>
+      <button
+        type="button"
+        className="studio-icon-button"
+        aria-label="Trang sau"
+        disabled={page >= pageCount - 1}
+        onClick={() => onPageChange(page + 1)}
+      >
+        <RightOutlined />
+      </button>
+    </nav>
+  );
+}
+
+export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPanelProps) {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
   const roomContextRef = useRef({ app, roomId });
   const roomOperationRef = useRef<ReturnType<typeof createRecruitmentRoomOperation> | null>(null);
   roomContextRef.current = { app, roomId };
 
-  const [departments, setDepartments] = useState<{ id: Department; label: string; count?: number }[]>(DEFAULT_DEPARTMENT_TABS);
-  const [department, setDepartment] = useState<Department>('it');
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-  const [jobsByDept, setJobsByDept] = useState<Record<string, Job[]>>({
-    'it': IT_JOBS,
-    'marketing': [],
-    'hr': [],
-    'other': [],
-  });
-  const [showForm, setShowForm] = useState(false);
-  const [draft, setDraft] = useState<JobDraft>(EMPTY_DRAFT);
+  const [departments, setDepartments] = useState<RecruitmentDepartment[]>(DEFAULT_DEPARTMENTS);
+  const [department, setDepartment] = useState<DepartmentFilter>('all');
+  const [jobs, setJobs] = useState<RecruitmentJob[]>([]);
+  const [selectedJob, setSelectedJob] = useState<RecruitmentJob | null>(null);
+  const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
+  const [downloadJDError, setDownloadJDError] = useState('');
+  const [query, setQuery] = useState('');
+  const [jobPage, setJobPage] = useState(0);
+  const [isMobileJobGrid, setIsMobileJobGrid] = useState(() => (
+    typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 720px)').matches
+  ));
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reloadSequence, setReloadSequence] = useState(0);
+
+  const [candidateCount, setCandidateCount] = useState<number | null>(null);
+  const [candidateMetricLoading, setCandidateMetricLoading] = useState(true);
+  const [candidateMetricError, setCandidateMetricError] = useState('');
+
+  const [showJobForm, setShowJobForm] = useState(false);
+  const [draft, setDraft] = useState<RecruitmentJobDraft>(EMPTY_RECRUITMENT_JOB_DRAFT);
+  const [jobDepartmentKey, setJobDepartmentKey] = useState('');
   const [isSavingJD, setIsSavingJD] = useState(false);
   const [saveJDError, setSaveJDError] = useState('');
+
   const [showDepartmentForm, setShowDepartmentForm] = useState(false);
   const [departmentName, setDepartmentName] = useState('');
   const [isSavingDepartment, setIsSavingDepartment] = useState(false);
   const [departmentError, setDepartmentError] = useState('');
+
   const [showRenameDepartmentForm, setShowRenameDepartmentForm] = useState(false);
   const [renamedDepartmentName, setRenamedDepartmentName] = useState('');
   const [isRenamingDepartment, setIsRenamingDepartment] = useState(false);
   const [renameDepartmentError, setRenameDepartmentError] = useState('');
-  const [isLoadingRecruitment, setIsLoadingRecruitment] = useState(true);
 
   useEffect(() => {
-    setDepartments(DEFAULT_DEPARTMENT_TABS);
-    setDepartment('it');
+    if (active) return;
+    setSelectedJob((current) => resolveJobDetailAfterTabActivityChange(active, current));
+    setDownloadJDError('');
+  }, [active]);
+
+  useEffect(() => {
+    setDepartments(DEFAULT_DEPARTMENTS);
+    setDepartment('all');
+    setJobs([]);
     setSelectedJob(null);
-    setJobsByDept({ it: [], marketing: [], hr: [], other: [] });
+    setDownloadingJobId(null);
+    setDownloadJDError('');
+    setQuery('');
+    setJobPage(0);
+    setLoadError('');
+    setCandidateCount(null);
+    setCandidateMetricError('');
+    setShowJobForm(false);
+    setDraft(EMPTY_RECRUITMENT_JOB_DRAFT);
+    setJobDepartmentKey('');
     setShowDepartmentForm(false);
     setDepartmentName('');
     setDepartmentError('');
-    setIsSavingDepartment(false);
     setShowRenameDepartmentForm(false);
     setRenamedDepartmentName('');
-    setIsRenamingDepartment(false);
     setRenameDepartmentError('');
-    setIsLoadingRecruitment(Boolean(app && roomId));
+  }, [app, roomId]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const mediaQuery = window.matchMedia('(max-width: 720px)');
+    const syncViewport = () => setIsMobileJobGrid(mediaQuery.matches);
+    syncViewport();
+    mediaQuery.addEventListener('change', syncViewport);
+    return () => mediaQuery.removeEventListener('change', syncViewport);
+  }, []);
+
+  useEffect(() => {
     roomOperationRef.current = null;
-    if (!app || !roomId) return;
+    if (!app || !roomId) {
+      setIsLoading(false);
+      setCandidateMetricLoading(false);
+      return;
+    }
+
     const operation = createRecruitmentRoomOperation(app, roomId);
     roomOperationRef.current = operation;
-    const loadJDs = async () => {
+    setIsLoading(true);
+    setLoadError('');
+    setCandidateMetricLoading(true);
+    setCandidateMetricError('');
+
+    void loadEvaluatedCandidateCount(app, roomId)
+      .then((count) => {
+        if (!operation.isCurrent(roomContextRef.current)) return;
+        setCandidateCount(count);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to load evaluated candidate metric', error);
+        if (!operation.isCurrent(roomContextRef.current)) return;
+        setCandidateCount(null);
+        setCandidateMetricError('Không tải được dữ liệu ứng viên');
+      })
+      .finally(() => {
+        if (operation.isCurrent(roomContextRef.current)) setCandidateMetricLoading(false);
+      });
+
+    const loadRecruitment = async () => {
       try {
         const service = new PipelineService(app, roomId, new MarkdownPathContextBuilder());
         const departmentStore = new AppDbRecruitmentDepartmentStore(app, roomId);
-        const storedDepartmentsPromise = departmentStore.list().catch((error: unknown) => {
-          console.error('Failed to load recruitment departments from App Database', error);
-          if (operation.isCurrent(roomContextRef.current)) {
-            setDepartmentError('Không tải được danh sách phòng ban đã lưu; các JD trong Room vẫn được hiển thị.');
-          }
-          return [];
-        });
-        const jds = await service.fetchAvailableJDs();
-        
-        const nextJobsByDept: Record<string, Job[]> = {
-          it: [],
-          marketing: [],
-          hr: [],
-          other: []
-        };
-        const jdDepartments: Array<{ key: string; label: string }> = [];
+        const [files, storedDepartments] = await Promise.all([
+          service.fetchAvailableJDs(),
+          departmentStore.list().catch((error: unknown) => {
+            console.error('Failed to load recruitment departments from App Database', error);
+            if (operation.isCurrent(roomContextRef.current)) {
+              setDepartmentError('Không tải được các phòng ban đã lưu; JD trong Room vẫn được hiển thị.');
+            }
+            return [];
+          }),
+        ]);
 
-        for (const jd of jds) {
-          if (!jd.name.startsWith('JD_') || jd.name.startsWith('JD_AI_')) continue;
-          
-          let content = '';
+        const parsedJobs = (await Promise.all(files.map(async (file) => {
+          if (!/^JD_(?!AI_)/i.test(file.name)) return null;
           try {
-            content = await readRoomFileText(app, { _id: jd._id, downloadUrl: jd.downloadUrl });
-          } catch (e: any) {
-            console.warn(`[Recruitment] Không đọc được JD ${jd.name}:`, e);
+            const content = await readRoomFileText(app, { _id: file._id, downloadUrl: file.downloadUrl });
+            return content ? parseRecruitmentJob(file, content) : null;
+          } catch (error) {
+            console.warn(`[Recruitment] Không đọc được JD ${file.name}:`, error);
+            return null;
           }
-          if (!content) {
-            continue;
-          }
+        }))).filter((job): job is RecruitmentJob => job !== null);
 
-          const titleH1Match = content.match(/^# TUYỂN DỤNG:\s*(.*)/m);
-          const titleMatch = content.match(/^# (.*)/m);
-          const title = titleH1Match ? titleH1Match[1].trim() : (titleMatch ? titleMatch[1].trim() : '');
-          if (!title) continue;
-
-          // Parse table format
-          const locationTableMatch = content.match(/\|\s*\*\*Địa điểm làm việc\*\*\s*\|\s*(.*?)\s*\|/);
-          const typeTableMatch = content.match(/\|\s*\*\*Thời gian làm việc\*\*\s*\|\s*(.*?)\s*\|/);
-          const salaryTableMatch = content.match(/\|\s*\*\*Mức lương\*\*\s*\|\s*(.*?)\s*\|/);
-
-          // Parse old format
-          const typeOldMatch = content.match(/- H\u00ecnh th\u1ee9c: (.*)/);
-          const salaryOldMatch = content.match(/- Thu nh\u1eadp: (.*)/);
-          const summaryOldMatch = content.match(/- M\u00f4 t\u1ea3 ng\u1eafn: (.*)/);
-          const summaryHtmlMatch = content.match(/<!-- SUMMARY:\s*(.*?)\s*-->/);
-          
-          const { key: deptId, label: deptLabel } = resolveJdDepartment(content);
-          const type = typeTableMatch ? typeTableMatch[1].trim() : (typeOldMatch ? typeOldMatch[1].trim() : 'Thỏa thuận');
-          const salary = salaryTableMatch ? salaryTableMatch[1].trim() : (salaryOldMatch ? salaryOldMatch[1].trim() : 'Thỏa thuận');
-          const location = locationTableMatch ? locationTableMatch[1].trim() : 'Không xác định';
-          const summary = summaryHtmlMatch ? summaryHtmlMatch[1].trim() : (summaryOldMatch ? summaryOldMatch[1].trim() : '');
-
-          if (!jdDepartments.find((item) => item.key === deptId)) {
-            jdDepartments.push({ key: deptId, label: deptLabel });
-          }
-
-          if (!nextJobsByDept[deptId]) nextJobsByDept[deptId] = [];
-
-          const respMatch = content.match(/## 2\. Mô tả công việc\n([\s\S]*?)(?=\n## |\n*$)/) || content.match(/## M\u00f4 t\u1ea3 c\u00f4ng vi\u1ec7c\n([\s\S]*?)(?=\n## |\n*$)/);
-          const responsibilities = respMatch ? respMatch[1].split('\n').filter(l => l.trim().startsWith('* ') || l.trim().startsWith('- ')).map(l => l.replace(/^[* -]\s*/, '').trim()) : [];
-          
-          const oldReqMatch = content.match(/## Y\u00eau c\u1ea7u\n([\s\S]*?)(?=\n## |\n*$)/);
-          const requirements = oldReqMatch ? oldReqMatch[1].split('\n').filter(l => l.trim().startsWith('- ')).map(l => l.replace(/^-\s*/, '').trim()) : undefined;
-
-          const oldBonusMatch = content.match(/## \u0110i\u1ec3m c\u1ed9ng\n([\s\S]*?)(?=\n## |\n*$)/);
-          const bonuses = oldBonusMatch ? oldBonusMatch[1].split('\n').filter(l => l.trim().startsWith('- ')).map(l => l.replace(/^-\s*/, '').trim()) : undefined;
-
-          // New format specific blocks
-          const reqExpMatch = content.match(/### Kinh nghiệm\n([\s\S]*?)(?=\n### |\n## |\n*$)/);
-          const req_experience = reqExpMatch ? reqExpMatch[1].split('\n').filter(l => l.trim().startsWith('* ')).map(l => l.replace(/^\*\s*/, '').trim()) : [];
-          
-          const reqProfMatch = content.match(/### Kỹ năng chuyên môn\n([\s\S]*?)(?=\n### |\n## |\n*$)/);
-          const req_professional = reqProfMatch ? reqProfMatch[1].split('\n').filter(l => l.trim().startsWith('* ')).map(l => l.replace(/^\*\s*/, '').trim()) : [];
-          
-          const reqSoftMatch = content.match(/### Kỹ năng mềm\n([\s\S]*?)(?=\n### |\n## |\n*$)/);
-          const req_soft = reqSoftMatch ? reqSoftMatch[1].split('\n').filter(l => l.trim().startsWith('* ')).map(l => l.replace(/^\*\s*/, '').trim()) : [];
-          
-          const reqEduMatch = content.match(/### Học vấn\n([\s\S]*?)(?=\n### |\n## |\n*$)/);
-          const req_education = reqEduMatch ? reqEduMatch[1].split('\n').filter(l => l.trim().startsWith('* ')).map(l => l.replace(/^\*\s*/, '').trim()) : [];
-
-          const benefitsMatch = content.match(/## 4\. Quyền lợi\n([\s\S]*?)(?=\n## |\n*$)/);
-          const benefits = benefitsMatch ? benefitsMatch[1].split('\n').filter(l => l.trim().startsWith('* ')).map(l => l.replace(/^\*\s*/, '').trim()) : [];
-
-          // Avoid duplicates
-          if (!nextJobsByDept[deptId].find(j => j.title === title)) {
-            nextJobsByDept[deptId].push({
-              title, type, salary, location, summary, responsibilities, requirements, bonuses,
-              req_experience, req_professional, req_soft, req_education, benefits
-            });
-          }
-        }
-
-        const storedDepartments = await storedDepartmentsPromise;
-        const mergedDepartments = mergeRecruitmentDepartments(storedDepartments, jdDepartments);
-        for (const item of mergedDepartments) {
-          if (!nextJobsByDept[item.key]) nextJobsByDept[item.key] = [];
-        }
+        const mergedDepartments = mergeRecruitmentDepartments(
+          storedDepartments,
+          parsedJobs.map((job) => ({ key: job.departmentKey, label: job.departmentLabel })),
+        );
         if (!operation.isCurrent(roomContextRef.current)) return;
-        setDepartments(mergedDepartments.map(({ key, label }) => ({ id: key, label })));
-        setJobsByDept(nextJobsByDept);
-      } catch (e: any) {
-        console.error("Failed to load JDs from room files", e);
-      } finally {
+        setDepartments(mergedDepartments);
+        setJobs(parsedJobs);
+      } catch (error) {
+        console.error('Failed to load recruitment data', error);
         if (operation.isCurrent(roomContextRef.current)) {
-          setIsLoadingRecruitment(false);
+          setLoadError(`Không thể tải danh sách JD: ${errorMessage(error)}`);
         }
+      } finally {
+        if (operation.isCurrent(roomContextRef.current)) setIsLoading(false);
       }
     };
-    loadJDs();
+
+    void loadRecruitment();
     return () => {
       operation.cancel();
       if (roomOperationRef.current === operation) roomOperationRef.current = null;
     };
-  }, [app, roomId]);
+  }, [app, roomId, reloadSequence]);
 
-  const selectDepartment = (nextDepartment: Department) => {
-    setDepartment(nextDepartment);
+  const countsByDepartment = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const job of jobs) counts.set(job.departmentKey, (counts.get(job.departmentKey) ?? 0) + 1);
+    return counts;
+  }, [jobs]);
+
+  const visibleJobs = useMemo(
+    () => filterRecruitmentJobs(jobs, department, query),
+    [department, jobs, query],
+  );
+
+  const paginatedJobs = useMemo(
+    () => paginateRecruitmentJobs(visibleJobs, jobPage, isMobileJobGrid),
+    [isMobileJobGrid, jobPage, visibleJobs],
+  );
+
+  useEffect(() => {
+    setJobPage(0);
+  }, [department, isMobileJobGrid, jobs, query]);
+
+  const selectDepartment = (key: DepartmentFilter) => {
+    setDepartment(key);
     setSelectedJob(null);
+    setDownloadJDError('');
     setShowRenameDepartmentForm(false);
     setRenamedDepartmentName('');
     setRenameDepartmentError('');
+  };
+
+  const openJobForm = () => {
+    if (departments.length === 0) return;
+    setJobDepartmentKey(getInitialJobDepartmentKey(department));
+    setSelectedJob(null);
+    setSaveJDError('');
+    setShowJobForm(true);
+  };
+
+  const openJobDetail = (job: RecruitmentJob) => {
+    setDownloadJDError('');
+    setSelectedJob(job);
+  };
+
+  const downloadJob = async (job: RecruitmentJob) => {
+    if (downloadingJobId) return;
+    if (!app) {
+      setDownloadJDError('Không thể tải JD vì chưa kết nối PrivOS.');
+      return;
+    }
+
+    const operation = roomOperationRef.current;
+    setDownloadingJobId(job.fileId);
+    setDownloadJDError('');
+    try {
+      const { blob, fileName } = await readRecruitmentJobDownload(app, job);
+      if (!operation?.isCurrent(roomContextRef.current)) return;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.style.display = 'none';
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (error) {
+      if (operation?.isCurrent(roomContextRef.current)) {
+        setDownloadJDError(`Không thể tải JD: ${errorMessage(error)}`);
+      }
+    } finally {
+      if (operation?.isCurrent(roomContextRef.current)) setDownloadingJobId(null);
+    }
   };
 
   const submitJob = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isSavingJD) return;
-    if (!draft.title.trim() || !draft.summary.trim() || !draft.type.trim() || !draft.salary.trim() || !draft.req_professional.trim()) return;
-    if (!app || !roomId) {
-      setSaveJDError('Không thể lưu JD vì chưa kết nối được với Room Files.');
+    if (!draft.title.trim() || !draft.summary.trim() || !draft.employmentType.trim()
+      || !draft.salary.trim() || !draft.professionalSkills.trim()) return;
+    if (!app || !roomId || !jobDepartmentKey) {
+      setSaveJDError('Không thể lưu JD vì chưa kết nối Room hoặc chưa chọn phòng ban.');
       return;
     }
 
-    const newJob: Job = {
-      title: draft.title.trim(),
-      type: draft.type.trim() || 'Thỏa thuận',
-      salary: draft.salary.trim() || 'Thỏa thuận',
-      location: draft.location.trim() || 'Không xác định',
-      summary: draft.summary.trim(),
-      responsibilities: splitLines(draft.responsibilities),
-      req_experience: splitLines(draft.req_experience),
-      req_professional: splitLines(draft.req_professional),
-      req_soft: splitLines(draft.req_soft),
-      req_education: splitLines(draft.req_education),
-      benefits: splitLines(draft.benefits),
-      contact_email: draft.contact_email.trim() || 'Không xác định',
-      contact_title: draft.contact_title.trim() || 'Không xác định',
-    };
+    const targetDepartment = departments.find((item) => item.key === jobDepartmentKey);
+    if (!targetDepartment) {
+      setSaveJDError('Phòng ban đã chọn không còn tồn tại.');
+      return;
+    }
 
-    const deptLabel = departments.find(d => d.id === department)?.label || department;
-    const content = `# TUYỂN DỤNG: ${newJob.title.toUpperCase()}
-
-<!-- DEPARTMENT_ID: ${department} -->
-
-***
-
-## 1. Thông tin chung
-
-| Hạng mục               | Chi tiết             |
-| ---------------------- | -------------------- |
-| **Vị trí tuyển dụng**  | ${newJob.title}    |
-| **Phòng ban**          | ${deptLabel}                  |
-| **Địa điểm làm việc**  | ${newJob.location}               |
-| **Thời gian làm việc** | ${newJob.type}            |
-| **Mức lương**          | ${newJob.salary} |
-
-***
-
-## 2. Mô tả công việc
-
-${newJob.responsibilities.length > 0 ? newJob.responsibilities.map(x => `* ${x}`).join('\n') : '* (Chưa cập nhật)'}
-
-***
-
-## 3. Yêu cầu ứng viên
-
-### Kinh nghiệm
-
-${newJob.req_experience && newJob.req_experience.length > 0 ? newJob.req_experience.map(x => `* ${x}`).join('\n') : '* Không yêu cầu'}
-
-### Kỹ năng chuyên môn
-
-${newJob.req_professional && newJob.req_professional.length > 0 ? newJob.req_professional.map(x => `* ${x}`).join('\n') : '* Không yêu cầu'}
-
-### Kỹ năng mềm
-
-${newJob.req_soft && newJob.req_soft.length > 0 ? newJob.req_soft.map(x => `* ${x}`).join('\n') : '* Không yêu cầu'}
-
-### Học vấn
-
-${newJob.req_education && newJob.req_education.length > 0 ? newJob.req_education.map(x => `* ${x}`).join('\n') : '* Không yêu cầu'}
-
-***
-
-## 4. Quyền lợi
-
-${newJob.benefits && newJob.benefits.length > 0 ? newJob.benefits.map(x => `* ${x}`).join('\n') : '* Trao đổi khi phỏng vấn'}
-
-***
-
-## 5. Cách thức ứng tuyển
-
-* **Email nhận CV:** _${newJob.contact_email}_
-* **Tiêu đề email:** _${newJob.contact_title}_
-
-> ⚠️ Thông tin email và tiêu đề ứng tuyển có thể thay đổi tùy đợt tuyển dụng. Vui lòng cập nhật nếu cần.
-
-***
-
-_Đăng ngày: ${new Date().toISOString().slice(0, 10)}_
-
-<!-- SUMMARY: ${newJob.summary} -->
-`;
-    const normalizedTitle = newJob.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
-    const fileName = `JD_${normalizedTitle.replace(/[^a-zA-Z0-9_ -]/g, '').trim().replace(/\s+/g, '_')}.md`;
-
+    const generated = buildRecruitmentJobDocument(draft, targetDepartment, new Date().toISOString());
     setIsSavingJD(true);
     setSaveJDError('');
     try {
-      await createOrUpdateFile(app, `${roomId}/hr-miniapp/jds/${fileName}`, content);
-      setJobsByDept(prev => ({
-        ...prev,
-        [department]: [...(prev[department] || []), newJob]
-      }));
-      setDraft(EMPTY_DRAFT);
-      setShowForm(false);
-    } catch (error: unknown) {
+      await createOrUpdateFile(app, `${roomId}/hr-miniapp/jds/${generated.fileName}`, generated.content);
+      if (!roomOperationRef.current?.isCurrent(roomContextRef.current)) return;
+      setDraft(EMPTY_RECRUITMENT_JOB_DRAFT);
+      setJobDepartmentKey('');
+      setShowJobForm(false);
+      setReloadSequence((value) => value + 1);
+    } catch (error) {
       console.error('Failed to save JD to Room Files', error);
-      const message = error instanceof Error ? error.message : String(error);
-      setSaveJDError(`Không thể lưu JD vào Room Files: ${message}`);
+      if (roomOperationRef.current?.isCurrent(roomContextRef.current)) {
+        setSaveJDError(`Không thể lưu JD vào Room Files: ${errorMessage(error)}`);
+      }
     } finally {
-      setIsSavingJD(false);
+      if (roomOperationRef.current?.isCurrent(roomContextRef.current)) setIsSavingJD(false);
     }
   };
 
   const submitDepartment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSavingDepartment || !departmentName.trim()) return;
-    if (!app || !roomId) {
-      setDepartmentError('Không thể lưu phòng ban vì chưa kết nối được với Room.');
-      return;
-    }
+    if (isSavingDepartment || !departmentName.trim() || !app || !roomId) return;
     const operation = roomOperationRef.current;
     if (!operation?.isCurrent(roomContextRef.current)) return;
+
     setIsSavingDepartment(true);
     setDepartmentError('');
     try {
-      const store = new AppDbRecruitmentDepartmentStore(app, roomId);
-      const saved = await store.create(departmentName, departments.length);
+      const saved = await new AppDbRecruitmentDepartmentStore(app, roomId)
+        .create(departmentName, departments.length);
       if (!operation.isCurrent(roomContextRef.current)) return;
-      setDepartments((current) => current.some((item) => item.id === saved.key)
+      setDepartments((current) => current.some((item) => item.key === saved.key)
         ? current
-        : [...current, { id: saved.key, label: saved.label }]);
-      setJobsByDept((current) => ({ ...current, [saved.key]: current[saved.key] || [] }));
+        : [...current, saved]);
       setDepartment(saved.key);
       setSelectedJob(null);
       setDepartmentName('');
       setShowDepartmentForm(false);
-    } catch (error: unknown) {
-      console.error('Failed to save recruitment department to App Database', error);
-      if (!operation.isCurrent(roomContextRef.current)) return;
-      const message = error instanceof Error ? error.message : String(error);
-      setDepartmentError(`Không thể lưu phòng ban vào Room: ${message}`);
-    } finally {
+    } catch (error) {
+      console.error('Failed to save recruitment department', error);
       if (operation.isCurrent(roomContextRef.current)) {
-        setIsSavingDepartment(false);
+        setDepartmentError(`Không thể lưu phòng ban vào Room: ${errorMessage(error)}`);
       }
+    } finally {
+      if (operation.isCurrent(roomContextRef.current)) setIsSavingDepartment(false);
     }
   };
 
   const submitDepartmentRename = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isRenamingDepartment || !renamedDepartmentName.trim()) return;
-    if (!app || !roomId) {
-      setRenameDepartmentError('Không thể đổi tên phòng ban vì chưa kết nối được với Room.');
-      return;
-    }
+    if (isRenamingDepartment || !renamedDepartmentName.trim() || !app || !roomId || department === 'all') return;
     if (!isRecruitmentDepartmentRenameable(department)) {
       setRenameDepartmentError('Phòng ban mặc định không thể đổi tên.');
       return;
@@ -423,336 +428,223 @@ _Đăng ngày: ${new Date().toISOString().slice(0, 10)}_
     setIsRenamingDepartment(true);
     setRenameDepartmentError('');
     try {
-      const order = Math.max(0, departments.findIndex((item) => item.id === department));
-      const store = new AppDbRecruitmentDepartmentStore(app, roomId);
-      const saved = await store.rename(department, renamedDepartmentName, order);
+      const order = Math.max(0, departments.findIndex((item) => item.key === department));
+      const saved = await new AppDbRecruitmentDepartmentStore(app, roomId)
+        .rename(department, renamedDepartmentName, order);
       if (!operation.isCurrent(roomContextRef.current)) return;
-      setDepartments((current) => current.map((item) => (
-        item.id === saved.key ? { ...item, label: saved.label } : item
-      )));
+      setDepartments((current) => current.map((item) => item.key === saved.key ? saved : item));
       setRenamedDepartmentName('');
       setShowRenameDepartmentForm(false);
-    } catch (error: unknown) {
-      console.error('Failed to rename recruitment department in App Database', error);
-      if (!operation.isCurrent(roomContextRef.current)) return;
-      const message = error instanceof Error ? error.message : String(error);
-      setRenameDepartmentError(`Không thể đổi tên phòng ban: ${message}`);
-    } finally {
+    } catch (error) {
+      console.error('Failed to rename recruitment department', error);
       if (operation.isCurrent(roomContextRef.current)) {
-        setIsRenamingDepartment(false);
+        setRenameDepartmentError(`Không thể đổi tên phòng ban: ${errorMessage(error)}`);
       }
+    } finally {
+      if (operation.isCurrent(roomContextRef.current)) setIsRenamingDepartment(false);
     }
   };
 
-  const jobs = jobsByDept[department] || [];
-  const departmentLabel = departments.find(d => d.id === department)?.label || department;
+  const activeDepartment = department === 'all'
+    ? null
+    : departments.find((item) => item.key === department) ?? null;
+  const departmentJobCount = department === 'all'
+    ? jobs.length
+    : countsByDepartment.get(department) ?? 0;
+  const emptyState = getRecruitmentEmptyState({
+    totalJobCount: jobs.length,
+    departmentJobCount,
+    hasQuery: Boolean(query.trim()),
+  });
 
   return (
-    <main className="recruitment-page">
-      <section className="recruitment-hero">
-        <span>QUẢN LÝ TUYỂN DỤNG</span>
-        <h1>Tạo và quản lý các vị trí tuyển dụng.</h1>
-        <p>Thêm mới Job Description (JD) để tự động hóa quy trình sàng lọc và đánh giá CV.</p>
+    <StudioPage className="recruitment-studio-page">
+      <StudioPageHeader
+        eyebrow="TUYỂN DỤNG"
+        title="Vị trí tuyển dụng"
+        description="Tổ chức phòng ban và quản lý mô tả công việc trong Room của bạn."
+        actions={(
+          <>
+            <button type="button" className="studio-button studio-button--secondary" onClick={() => setShowDepartmentForm(true)}>
+              <ApartmentOutlined /> Phòng ban
+            </button>
+            <button type="button" className="studio-button studio-button--primary" onClick={openJobForm} disabled={departments.length === 0}>
+              <PlusOutlined /> Tạo JD thủ công
+            </button>
+          </>
+        )}
+      />
+
+      <section className="recruitment-studio-metrics" aria-label="Tổng quan tuyển dụng">
+        <StudioMetricCard label="Vị trí đang tuyển" value={jobs.length} description="JD trong Room" icon={<FileTextOutlined />} />
+        <StudioMetricCard label="Phòng ban" value={departments.length} description="Đang quản lý" icon={<ApartmentOutlined />} />
+        <StudioMetricCard
+          label="Ứng viên đã đánh giá"
+          value={candidateCount}
+          description="Từ các đợt sàng lọc"
+          icon={<TeamOutlined />}
+          loading={candidateMetricLoading}
+          error={candidateMetricError || undefined}
+        />
       </section>
 
-      <section className="recruitment-content">
-        <div className="recruitment-category-list" role="tablist" aria-label="Nhóm vị trí tuyển dụng" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px' }}>
-          {departments.map((item) => {
-            const count = jobsByDept[item.id]?.length || 0;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                role="tab"
-                aria-selected={department === item.id}
-                className={`recruitment-category${department === item.id ? ' recruitment-category-active' : ''}`}
-                onClick={() => selectDepartment(item.id)}
-              >
-                {item.label}
-                {count > 0 && <span>{count}</span>}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            className="recruitment-category"
-            disabled={
-              isLoadingRecruitment
-              || isSavingDepartment
-              || !app
-              || !roomId
-              || !roomOperationRef.current?.isCurrent(roomContextRef.current)
-            }
-            onClick={() => {
-              setDepartmentError('');
-              setShowRenameDepartmentForm(false);
-              setRenamedDepartmentName('');
-              setRenameDepartmentError('');
-              setShowDepartmentForm((current) => !current);
-            }}
-            style={{ borderStyle: 'dashed' }}
-            aria-expanded={showDepartmentForm}
-          >
-            + Thêm phòng ban
-          </button>
-        </div>
+      {showDepartmentForm ? (
+        <RecruitmentDepartmentForm
+          departmentName={departmentName}
+          errorMessage={departmentError}
+          isLoading={isLoading}
+          isSaving={isSavingDepartment}
+          onNameChange={setDepartmentName}
+          onSubmit={submitDepartment}
+          onCancel={() => {
+            setDepartmentName('');
+            setDepartmentError('');
+            setShowDepartmentForm(false);
+          }}
+        />
+      ) : null}
 
-        {showDepartmentForm && (
-          <RecruitmentDepartmentForm
-            departmentName={departmentName}
-            isLoading={isLoadingRecruitment}
-            isSaving={isSavingDepartment}
-            onNameChange={setDepartmentName}
-            onSubmit={submitDepartment}
-            onCancel={() => {
-              setDepartmentName('');
-              setDepartmentError('');
-              setShowDepartmentForm(false);
-            }}
-          />
-        )}
-        {departmentError && <p className="recruitment-department-error" role="alert">{departmentError}</p>}
-
-            <div className="recruitment-heading">
-              <div>
-                <span>{jobs.length > 0 ? 'ĐANG TUYỂN' : 'TỰ TẠO JD'}</span>
-                <h2>Phòng Ban: {departmentLabel}</h2>
-              </div>
-              <div className="recruitment-heading-actions">
-                {isRecruitmentDepartmentRenameable(department) && (
+      <section className="recruitment-studio-layout">
+        <aside className="recruitment-studio-departments" aria-label="Lọc theo phòng ban">
+          <div className="recruitment-studio-departments__heading">
+            <span>Phòng ban</span>
+            <button type="button" className="studio-icon-button" aria-label="Thêm phòng ban" onClick={() => setShowDepartmentForm(true)}><PlusOutlined /></button>
+          </div>
+          <div className="recruitment-studio-department-list" role="tablist" aria-label="Phòng ban tuyển dụng">
+            <button type="button" role="tab" aria-selected={department === 'all'} className={department === 'all' ? 'is-active' : undefined} onClick={() => selectDepartment('all')}>
+              <span>Tất cả vị trí</span><strong>{jobs.length}</strong>
+            </button>
+            {departments.map((item) => (
+              <div className="recruitment-studio-department-row" key={item.key}>
+                <button type="button" role="tab" aria-selected={department === item.key} className={department === item.key ? 'is-active' : undefined} onClick={() => selectDepartment(item.key)}>
+                  <span>{item.label}</span><strong>{countsByDepartment.get(item.key) ?? 0}</strong>
+                </button>
+                {isRecruitmentDepartmentRenameable(item.key) ? (
                   <button
                     type="button"
-                    className="rename-department-button"
-                    disabled={isLoadingRecruitment || isRenamingDepartment || !app || !roomId}
-                    aria-expanded={showRenameDepartmentForm}
+                    className="recruitment-studio-department-edit"
+                    aria-label={`Đổi tên phòng ban ${item.label}`}
                     onClick={() => {
-                      setShowDepartmentForm(false);
-                      setDepartmentError('');
-                      setRenameDepartmentError('');
+                      selectDepartment(item.key);
                       setRenamedDepartmentName('');
-                      setShowRenameDepartmentForm((current) => !current);
+                      setRenameDepartmentError('');
+                      setShowRenameDepartmentForm(true);
                     }}
-                  >
-                    Đổi tên
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="add-job-button"
-                  onClick={() => {
-                    setShowRenameDepartmentForm(false);
-                    setRenamedDepartmentName('');
-                    setRenameDepartmentError('');
-                    setShowForm(true);
-                  }}
-                >
-                  <span aria-hidden="true">+</span> Thêm JD
-                </button>
+                  ><EditOutlined /></button>
+                ) : null}
               </div>
+            ))}
+          </div>
+          <div className="recruitment-studio-ai-card">
+            <BulbOutlined />
+            <strong>Cần một JD mới?</strong>
+            <p>Trao đổi với trợ lý để soạn mô tả công việc nhanh hơn.</p>
+            <button type="button" onClick={() => onNavigate('chatbotJD')}>Soạn cùng AI <ArrowRightOutlined /></button>
+          </div>
+        </aside>
+
+        <div className="recruitment-studio-content">
+          <div className="recruitment-studio-toolbar">
+            <div>
+              <h2>{activeDepartment?.label ?? 'Tất cả vị trí'}</h2>
+              <span>{visibleJobs.length} vị trí</span>
             </div>
+            <StudioSearchInput
+              label="Tìm vị trí tuyển dụng"
+              icon={<SearchOutlined />}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Tìm vị trí tuyển dụng"
+              wrapperClassName="recruitment-studio-search"
+            />
+          </div>
 
-            {showRenameDepartmentForm && (
-              <RecruitmentDepartmentRenameForm
-                currentDepartmentName={departmentLabel}
-                departmentName={renamedDepartmentName}
-                errorMessage={renameDepartmentError}
-                isSaving={isRenamingDepartment}
-                onNameChange={setRenamedDepartmentName}
-                onSubmit={submitDepartmentRename}
-                onCancel={() => {
-                  setRenamedDepartmentName('');
-                  setRenameDepartmentError('');
-                  setShowRenameDepartmentForm(false);
-                }}
-              />
-            )}
-
-            {showForm && (
-              <form className="job-form" onSubmit={submitJob}>
-                <div className="job-form-heading">
-                  <div>
-                    <span>JD MỚI</span>
-                    <h3>Thêm vị trí tuyển dụng</h3>
-                  </div>
-                  <button type="button" aria-label="Đóng form thêm JD" onClick={() => setShowForm(false)}>×</button>
-                </div>
-                <div className="job-form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                  <label>
-                    <span>Vị trí tuyển dụng <b style={{color: 'red'}}>*</b></span>
-                    <input list="list-title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Ví dụ: Backend Developer" required />
-                    <datalist id="list-title">
-                      <option value="Lập trình viên Front-end" />
-                      <option value="Lập trình viên Back-end" />
-                      <option value="Lập trình viên Mobile" />
-                      <option value="Data Analyst" />
-                      <option value="Chuyên viên Nhân sự" />
-                      <option value="Chuyên viên Marketing" />
-                    </datalist>
-                  </label>
-                  <label>
-                    <span>Thời gian làm việc <b style={{color: 'red'}}>*</b></span>
-                    <input list="list-type" value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })} placeholder="Ví dụ: Full-time" required />
-                    <datalist id="list-type">
-                      <option value="Full-time" />
-                      <option value="Part-time" />
-                      <option value="Thực tập sinh (Intern)" />
-                      <option value="Cộng tác viên (CTV)" />
-                    </datalist>
-                  </label>
-                  <label>
-                    <span>Mức lương <b style={{color: 'red'}}>*</b></span>
-                    <input list="list-salary" value={draft.salary} onChange={(event) => setDraft({ ...draft, salary: event.target.value })} placeholder="Ví dụ: 12.000.000 VNĐ/tháng" required />
-                    <datalist id="list-salary">
-                      <option value="Thỏa thuận theo năng lực" />
-                      <option value="10.000.000 - 15.000.000 VNĐ" />
-                      <option value="15.000.000 - 20.000.000 VNĐ" />
-                      <option value="20.000.000 - 30.000.000 VNĐ" />
-                      <option value="Cạnh tranh trên thị trường" />
-                    </datalist>
-                  </label>
-                  <label>
-                    <span>Địa điểm làm việc</span>
-                    <input list="list-location" value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} placeholder="Ví dụ: Hà Nội" />
-                    <datalist id="list-location">
-                      <option value="Hà Nội" />
-                      <option value="TP. Hồ Chí Minh" />
-                      <option value="Đà Nẵng" />
-                      <option value="Remote" />
-                      <option value="Hybrid" />
-                    </datalist>
-                  </label>
-                  <label className="job-form-wide" style={{ gridColumn: '1 / -1' }}>
-                    <span>Mô tả ngắn <b style={{color: 'red'}}>*</b></span>
-                    <textarea value={draft.summary} onChange={(event) => setDraft({ ...draft, summary: event.target.value })} placeholder="Giới thiệu ngắn hiển thị trên thẻ..." required />
-                  </label>
-                  <label className="job-form-wide" style={{ gridColumn: '1 / -1' }}>
-                    <span>Mô tả công việc</span>
-                    <textarea value={draft.responsibilities} onChange={(event) => setDraft({ ...draft, responsibilities: event.target.value })} placeholder="Mỗi dòng là một đầu việc (*...)" />
-                  </label>
-                  <label>
-                    <span>Kinh nghiệm</span>
-                    <input list="list-experience" value={draft.req_experience} onChange={(event) => setDraft({ ...draft, req_experience: event.target.value })} placeholder="Yêu cầu về kinh nghiệm..." />
-                    <datalist id="list-experience">
-                      <option value="Không yêu cầu kinh nghiệm" />
-                      <option value="Dưới 1 năm kinh nghiệm" />
-                      <option value="1-2 năm kinh nghiệm" />
-                      <option value="3-5 năm kinh nghiệm" />
-                      <option value="Trên 5 năm kinh nghiệm" />
-                    </datalist>
-                  </label>
-                  <label>
-                    <span>Học vấn</span>
-                    <input list="list-education" value={draft.req_education} onChange={(event) => setDraft({ ...draft, req_education: event.target.value })} placeholder="Yêu cầu học vấn..." />
-                    <datalist id="list-education">
-                      <option value="Không yêu cầu bằng cấp" />
-                      <option value="Tốt nghiệp Cao đẳng trở lên" />
-                      <option value="Tốt nghiệp Đại học trở lên" />
-                      <option value="Tốt nghiệp Đại học chuyên ngành CNTT" />
-                      <option value="Đang là sinh viên năm 3, năm 4" />
-                    </datalist>
-                  </label>
-                  <label className="job-form-wide" style={{ gridColumn: '1 / -1' }}>
-                    <span>Kỹ năng chuyên môn <b style={{color: 'red'}}>*</b></span>
-                    <textarea value={draft.req_professional} onChange={(event) => setDraft({ ...draft, req_professional: event.target.value })} placeholder="Kỹ năng chuyên môn..." required />
-                  </label>
-                  <label className="job-form-wide" style={{ gridColumn: '1 / -1' }}>
-                    <span>Kỹ năng mềm</span>
-                    <textarea value={draft.req_soft} onChange={(event) => setDraft({ ...draft, req_soft: event.target.value })} placeholder="Kỹ năng mềm..." />
-                  </label>
-                  <label className="job-form-wide" style={{ gridColumn: '1 / -1' }}>
-                    <span>Quyền lợi</span>
-                    <textarea value={draft.benefits} onChange={(event) => setDraft({ ...draft, benefits: event.target.value })} placeholder="Mỗi dòng là một quyền lợi..." />
-                  </label>
-                  <label>
-                    <span>Email nhận CV</span>
-                    <input type="email" value={draft.contact_email} onChange={(event) => setDraft({ ...draft, contact_email: event.target.value })} placeholder="Ví dụ: hr@company.com" />
-                  </label>
-                  <label>
-                    <span>Tiêu đề email</span>
-                    <input value={draft.contact_title} onChange={(event) => setDraft({ ...draft, contact_title: event.target.value })} placeholder="Ví dụ: [Backend] - Họ tên" />
-                  </label>
-                </div>
-                <div className="job-form-actions">
-                  <button type="button" onClick={() => setShowForm(false)}>Hủy</button>
-                  <button type="submit" disabled={isSavingJD} aria-label={isSavingJD ? 'Đang lưu JD' : undefined}>
-                    {isSavingJD ? <span className="recruitment-save-spinner" aria-hidden="true" /> : 'Lưu JD'}
-                  </button>
-                </div>
-                {saveJDError && <p className="job-form-save-error" role="alert">{saveJDError}</p>}
-              </form>
-            )}
-
-            {jobs.length > 0 ? (
-              <div className="job-grid">
-                {jobs.map((job) => (
-                  <article className="job-card" key={job.title}>
-                    <span className="job-team">{departmentLabel}</span>
+          {loadError ? (
+            <StudioInlineState tone="danger" title="Không tải được dữ liệu tuyển dụng">
+              <p>{loadError}</p>
+              <button type="button" className="studio-button studio-button--secondary" onClick={() => setReloadSequence((value) => value + 1)}>Thử lại</button>
+            </StudioInlineState>
+          ) : isLoading ? (
+            <div className="recruitment-studio-loading" role="status">Đang tải vị trí tuyển dụng…</div>
+          ) : visibleJobs.length > 0 ? (
+            <>
+              <div className="recruitment-studio-job-grid">
+                {paginatedJobs.jobs.map((job) => (
+                  <article className="recruitment-studio-job-card" key={job.fileId}>
+                    <span className="recruitment-studio-job-card__department">{job.departmentLabel}</span>
                     <h3>{job.title}</h3>
-                    <p>{job.summary}</p>
-                    <dl>
-                      <div><dt>Hình thức</dt><dd>{job.type}</dd></div>
-                      <div><dt>Thu nhập</dt><dd>{job.salary}</dd></div>
-                    </dl>
-                    <button
-                      type="button"
-                      className="job-detail-button"
-                      onClick={() => setSelectedJob(selectedJob?.title === job.title ? null : job)}
-                    >
-                      {selectedJob?.title === job.title ? 'Thu gọn' : 'Xem chi tiết'} <span aria-hidden="true">→</span>
-                    </button>
+                    <p>{job.summary || 'Chưa có mô tả ngắn cho vị trí này.'}</p>
+                    <div className="recruitment-studio-job-card__location"><EnvironmentOutlined /> {job.location}</div>
+                    <div className="recruitment-studio-job-card__meta">
+                      <span><ClockCircleOutlined /> {job.employmentType}</span>
+                      <strong>{job.salary}</strong>
+                    </div>
+                    <button type="button" onClick={() => openJobDetail(job)}>Xem chi tiết <ArrowRightOutlined /></button>
                   </article>
                 ))}
               </div>
-            ) : (
-              !showForm && (
-                <section className="recruitment-empty recruitment-empty-compact">
-                  <div aria-hidden="true">+</div>
-                  <h2>Chưa có JD nào</h2>
-                  <p>Chọn “Thêm JD” để tạo vị trí tuyển dụng mới.</p>
-                </section>
-              )
-            )}
-
-            {selectedJob && (
-              <article className="job-detail-panel">
-                <div className="job-detail-title">
-                  <div>
-                    <span>{departmentLabel} · THÔNG TIN TUYỂN DỤNG</span>
-                    <h2>{selectedJob.title}</h2>
-                  </div>
-                  <button type="button" onClick={() => setSelectedJob(null)} aria-label="Đóng chi tiết vị trí">×</button>
-                </div>
-                <div className="job-detail-columns">
-                  {selectedJob.responsibilities && selectedJob.responsibilities.length > 0 && (
-                    <div><h3>Mô tả công việc</h3><ul>{selectedJob.responsibilities.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                  {selectedJob.requirements && selectedJob.requirements.length > 0 && (
-                    <div><h3>Yêu cầu</h3><ul>{selectedJob.requirements.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                  {selectedJob.bonuses && selectedJob.bonuses.length > 0 && (
-                    <div><h3>Điểm cộng</h3><ul>{selectedJob.bonuses.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                  
-                  {/* New format fields */}
-                  {selectedJob.req_experience && selectedJob.req_experience.length > 0 && (
-                    <div><h3>Kinh nghiệm</h3><ul>{selectedJob.req_experience.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                  {selectedJob.req_professional && selectedJob.req_professional.length > 0 && (
-                    <div><h3>Kỹ năng chuyên môn</h3><ul>{selectedJob.req_professional.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                  {selectedJob.req_soft && selectedJob.req_soft.length > 0 && (
-                    <div><h3>Kỹ năng mềm</h3><ul>{selectedJob.req_soft.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                  {selectedJob.req_education && selectedJob.req_education.length > 0 && (
-                    <div><h3>Học vấn</h3><ul>{selectedJob.req_education.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                  {selectedJob.benefits && selectedJob.benefits.length > 0 && (
-                    <div><h3>Quyền lợi</h3><ul>{selectedJob.benefits.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                  )}
-                </div>
-              </article>
-            )}
+              <RecruitmentJobPager
+                page={paginatedJobs.page}
+                pageCount={paginatedJobs.pageCount}
+                onPageChange={setJobPage}
+              />
+            </>
+          ) : (
+            <div className="recruitment-studio-empty">
+              <FileTextOutlined />
+              <h3>{emptyState.title}</h3>
+              <p>{emptyState.description}</p>
+              {emptyState.showCreateAction ? <button type="button" className="studio-button studio-button--primary" onClick={openJobForm}>Tạo JD thủ công</button> : null}
+            </div>
+          )}
+        </div>
       </section>
-    </main>
+
+      <RecruitmentJobFormDialog
+        open={showJobForm}
+        draft={draft}
+        departments={departments}
+        departmentKey={jobDepartmentKey}
+        isSaving={isSavingJD}
+        saveError={saveJDError}
+        onDepartmentChange={setJobDepartmentKey}
+        onDraftChange={setDraft}
+        onSubmit={submitJob}
+        onClose={() => {
+          if (!isSavingJD) {
+            setShowJobForm(false);
+            setSaveJDError('');
+            setJobDepartmentKey('');
+          }
+        }}
+      />
+      <RecruitmentJobDetailDialog
+        job={selectedJob}
+        isDownloading={Boolean(selectedJob && downloadingJobId === selectedJob.fileId)}
+        downloadError={downloadJDError}
+        onClose={() => {
+          setSelectedJob(null);
+          setDownloadJDError('');
+        }}
+        onDownload={(job) => void downloadJob(job)}
+        onEditWithAI={(job) => onNavigate('chatbotJD', recruitmentJobNavigationContext(job))}
+        onUseInPipeline={(job) => onNavigate('pipeline', recruitmentJobNavigationContext(job))}
+      />
+      {showRenameDepartmentForm && activeDepartment ? (
+        <RecruitmentDepartmentRenameForm
+          currentDepartmentName={activeDepartment.label}
+          departmentName={renamedDepartmentName}
+          errorMessage={renameDepartmentError}
+          isSaving={isRenamingDepartment}
+          onNameChange={setRenamedDepartmentName}
+          onSubmit={submitDepartmentRename}
+          onCancel={() => {
+            setRenamedDepartmentName('');
+            setRenameDepartmentError('');
+            setShowRenameDepartmentForm(false);
+          }}
+        />
+      ) : null}
+    </StudioPage>
   );
 }
