@@ -137,7 +137,7 @@ function ThemedApp() {
 
   const handleNavigate = (
     target: AppTab,
-    context?: Pick<StudioNavigationIntent, 'jd'>,
+    context?: Pick<StudioNavigationIntent, 'jd' | 'screening'>,
   ) => {
     if (!canSelectPayrollTab(target, payrollAccessRoles)) return;
     setNavigationIntent((previous) => nextStudioNavigationIntent(previous, target, context));
@@ -167,8 +167,14 @@ function ThemedApp() {
         </div>
         {panel('email', <EmailTab active={tab === 'email'} />)}
         {panel('recruitment', <RecruitmentPanel active={tab === 'recruitment'} onNavigate={handleNavigate} />)}
-        {panel('pipeline', <PipelineDashboard active={tab === 'pipeline'} navigationIntent={navigationIntent} />)}
-        {panel('cvScored', <CVScoredTab active={tab === 'cvScored'} />)}
+        {panel('pipeline', (
+          <PipelineDashboard
+            active={tab === 'pipeline'}
+            navigationIntent={navigationIntent}
+            onNavigate={handleNavigate}
+          />
+        ))}
+        {panel('cvScored', <CVScoredTab active={tab === 'cvScored'} navigationIntent={navigationIntent} />)}
         {panel('chatbotJD', <JDChatbotTab navigationIntent={navigationIntent} />)}
         {panel('lifecycle', <LifecycleDashboard active={tab === 'lifecycle'} />)}
         {canAccessPayroll &&

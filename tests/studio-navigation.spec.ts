@@ -12,6 +12,7 @@ describe('Studio navigation model', () => {
       'home',
       'recruitment',
       'pipeline',
+      'cvScored',
       'chatbotJD',
     ]);
   });

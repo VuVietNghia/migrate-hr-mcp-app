@@ -35,6 +35,11 @@ import {
   renderActiveInviteTemplate,
   type ActiveTemplateRepository,
 } from './invite-template-state';
+import {
+  resolveOrLoadIntentScreeningBoard,
+  screeningBoardRevealSequence,
+  type StudioNavigationIntent,
+} from '../studio/studio-navigation-intent';
 
 export interface CVProfile {
   _id: string;
@@ -226,20 +231,31 @@ export interface CVBoardData {
 
 export function CVBoard({ 
   board, 
+  revealSequence,
   onMove, 
   onInvite,
   onSelectDetail,
   isInviteSent
 }: { 
   board: CVBoardData, 
+  revealSequence?: number,
   onMove: (listId: string, id: string, newStatus: string) => void, 
   onInvite: (cv: CVProfile, posName?: string) => void,
   onSelectDetail: (cv: CVProfile, listName: string) => void,
   isInviteSent: (id: string) => boolean
 }) {
+  const boardRootRef = React.useRef<HTMLDivElement>(null);
   const boardRef = React.useRef<HTMLDivElement>(null);
-  const [isCollapsed, setIsCollapsed] = React.useState(true);
+  const [isCollapsed, setIsCollapsed] = React.useState(!revealSequence);
   const columns = getCVColumnsForStages(board.stagesMap, board.cvs.some((cv) => cv.status === '01_Dau_Vao'));
+
+  React.useEffect(() => {
+    if (!revealSequence) return;
+    setIsCollapsed(false);
+    window.requestAnimationFrame(() => {
+      boardRootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [revealSequence]);
 
   const scrollOneColumn = (direction: -1 | 1) => {
     const container = boardRef.current;
@@ -252,7 +268,7 @@ export function CVBoard({
   };
 
   return (
-    <div className="cv-kanban-board" style={{ marginBottom: isCollapsed ? '16px' : '40px' }}>
+    <div ref={boardRootRef} className="cv-kanban-board" style={{ marginBottom: isCollapsed ? '16px' : '40px' }}>
       <div style={{ width: '100%', padding: '0 10px', marginBottom: isCollapsed ? '6px' : '16px', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: '8px' }}>
         <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: 'var(--text)' }}>{board.listName}</h3>
         <button
@@ -376,7 +392,13 @@ function renderFormattedReason(reasonText: string) {
 }
 
 /** `active` is true only while this tab is on screen; polling is gated on it. */
-export default function CVScoredTab({ active = false }: { active?: boolean } = {}) {
+export default function CVScoredTab({
+  active = false,
+  navigationIntent = null,
+}: {
+  active?: boolean;
+  navigationIntent?: StudioNavigationIntent | null;
+} = {}) {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
   const templateRepository = useMemo(
@@ -387,6 +409,10 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
   const [searchQuery, setSearchQuery] = useState('');
   const [boards, setBoards] = useState<CVBoardData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [targetBoardLoading, setTargetBoardLoading] = useState(false);
+  const boardsRef = React.useRef<CVBoardData[]>([]);
+  const handledNavigationSequenceRef = React.useRef(0);
+  const candidateNavigationRequestRef = React.useRef(0);
   
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedCVForDetail, setSelectedCVForDetail] = useState<{ cv: CVProfile; listName: string } | null>(null);
@@ -424,6 +450,10 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
     if (inviteToastTimerRef.current) window.clearTimeout(inviteToastTimerRef.current);
   }, []);
   const [boardNotice, setBoardNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    boardsRef.current = boards;
+  }, [boards]);
 
   const inviteValidationError = getInviteEmailValidationError({
     candidateName: inviteCandidateName,
@@ -666,6 +696,44 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!active || !app || !roomId || navigationIntent?.target !== 'cvScored' || !navigationIntent.screening) return;
+    if (handledNavigationSequenceRef.current >= navigationIntent.sequence) return;
+    const screeningReference = navigationIntent.screening;
+    handledNavigationSequenceRef.current = navigationIntent.sequence;
+    candidateNavigationRequestRef.current = navigationIntent.sequence;
+    const requestSequence = navigationIntent.sequence;
+    setSearchQuery('');
+    setTargetBoardLoading(true);
+
+    const openTargetBoard = async () => {
+      try {
+        const target = await resolveOrLoadIntentScreeningBoard(
+          navigationIntent,
+          'cvScored',
+          boardsRef.current,
+          (reference) => loadScreeningBoard(app, { _id: reference.listId, name: reference.listName }),
+          () => new Promise<void>((resolve) => window.setTimeout(resolve, 500)),
+          12,
+        );
+        if (!target || candidateNavigationRequestRef.current !== requestSequence) return;
+        setBoards((previous) => {
+          const existingIndex = previous.findIndex((board) => board.listId === target.listId);
+          if (existingIndex < 0) return [target, ...previous];
+          return previous.map((board, index) => index === existingIndex ? target : board);
+        });
+        setBoardNotice(null);
+      } catch (error) {
+        if (candidateNavigationRequestRef.current !== requestSequence) return;
+        setBoardNotice(`Chưa tải được bảng ${screeningReference.listName}: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        if (candidateNavigationRequestRef.current === requestSequence) setTargetBoardLoading(false);
+      }
+    };
+
+    void openTargetBoard();
+  }, [active, app, navigationIntent?.sequence, roomId]);
+
   // Mỗi lần poll dựng lại toàn bộ board từ item trên Hub: thẻ mới xuất hiện, thẻ bị xoá biến mất,
   // mọi field được làm mới. Chỉ setBoards khi có khác biệt để không re-render mỗi 3 giây.
   const pollBoards = useCallback(async (required = false) => {
@@ -855,6 +923,12 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
         </div>
       )}
 
+      {targetBoardLoading && (
+        <div className="hr-status-banner hr-status-info">
+          Đang tải đúng bảng ứng viên của JD vừa sàng lọc…
+        </div>
+      )}
+
       {loading ? (
         <div className="kanban-loading">
           <div className="spinner"></div>
@@ -870,6 +944,7 @@ export default function CVScoredTab({ active = false }: { active?: boolean } = {
             <CVBoard 
               key={board.listId} 
               board={board} 
+              revealSequence={screeningBoardRevealSequence(navigationIntent, board)}
               onMove={handleMove} 
               onInvite={(cv, posName) => {
                 let cleanName = stripCvFileSuffix(cv.name.replace(/\.md$/i, ''));

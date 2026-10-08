@@ -21,7 +21,7 @@ const STAGES = [
  * Luong list moi: getAll rong -> create -> batchCreateItems -> createItem (config) -> moveItemToStage.
  * Hub tu choi thi callServerTool van resolve voi isError: true, stub tai tao dung dang do.
  */
-function createAppStub(options: { createdItemIds: string[]; rejectMoveFor?: string }) {
+function createAppStub(options: { createdItemIds: string[]; rejectMoveFor?: string; batchError?: boolean }) {
   const calls: ToolCall[] = [];
   const app = {
     async callServerTool(call: ToolCall) {
@@ -32,6 +32,9 @@ function createAppStub(options: { createdItemIds: string[]; rejectMoveFor?: stri
         case 'mcpapp.lists.create':
           return jsonResult({ list: { _id: 'list-1' }, stages: STAGES });
         case 'mcpapp.lists.batchCreateItems':
+          if (options.batchError) {
+            return { isError: true, content: [{ type: 'text', text: 'Batch refused' }] };
+          }
           return jsonResult({ items: options.createdItemIds.map((_id) => ({ _id })) });
         case 'mcpapp.lists.createItem':
           return jsonResult({ item: { _id: 'config-1' } });
@@ -53,12 +56,12 @@ const RESULTS = [
   { originalName: 'CV_B.pdf', normalizedName: 'Tran Thi B', score: 30, category: 'KHÔNG ĐẠT', reason: 'khong dat' },
 ];
 
-async function run(options: { createdItemIds: string[]; rejectMoveFor?: string }) {
+async function run(options: { createdItemIds: string[]; rejectMoveFor?: string; batchError?: boolean }) {
   const { app, calls } = createAppStub(options);
   const service = new PipelineService(app as never, 'room-1', {} as never);
   const logs: string[] = [];
-  await service.createKanbanBatchViaAI(RESULTS, 'JD_Developer.md', (msg) => logs.push(msg));
-  return { calls, logs };
+  const savedBoard = await service.createKanbanBatchViaAI(RESULTS, 'JD_Developer.md', (msg) => logs.push(msg));
+  return { calls, logs, savedBoard };
 }
 
 describe('createKanbanBatchViaAI - chuyen cot va bao the ket', () => {
@@ -74,7 +77,8 @@ describe('createKanbanBatchViaAI - chuyen cot va bao the ket', () => {
   });
 
   it('moi lan chuyen cot thanh cong: giu log cu, chuyen dung stage', async () => {
-    const { calls, logs } = await run({ createdItemIds: ['item-1', 'item-2'] });
+    const { calls, logs, savedBoard } = await run({ createdItemIds: ['item-1', 'item-2'] });
+    expect(savedBoard).toEqual({ listId: 'list-1', listName: 'SCREENING_DEVELOPER' });
 
     expect(logs.some((line) => line.includes('vào đúng stage'))).toBe(true);
     expect(logs.some((line) => line.includes('chưa chuyển được'))).toBe(false);
@@ -90,6 +94,10 @@ describe('createKanbanBatchViaAI - chuyen cot va bao the ket', () => {
     const stuckLog = logs.find((line) => line.includes('chưa chuyển được sang cột đích'));
     expect(stuckLog).toContain(formatKanbanItemTitle('Tran Thi B'));
     expect(calls.filter((call) => call.name === 'mcpapp.lists.moveItemToStage')).toHaveLength(1);
+  });
+
+  it('batchCreateItems tra isError: khong bao da luu va khong tra candidate board', async () => {
+    await expect(run({ createdItemIds: [], batchError: true })).rejects.toThrow('Batch refused');
   });
 
   it('source khong con goi thang moveItemToStage', () => {

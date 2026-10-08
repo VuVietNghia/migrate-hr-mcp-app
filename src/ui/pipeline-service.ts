@@ -25,6 +25,11 @@ import { redactFileName } from './log-redaction';
  */
 const MAX_CONSECUTIVE_POLL_FAILURES = 10;
 
+export interface SavedScreeningBoard {
+  listId: string;
+  listName: string;
+}
+
 /**
  * `setTimeout` that also loses to an abort. The poll below runs for up to ten minutes; without
  * this an unmounted tab keeps the loop, and its REST calls, alive to the end.
@@ -1018,7 +1023,7 @@ ${content}
     results: Array<{ originalName: string; normalizedName?: string; score?: number; category?: string; jobFamily?: string; reason?: string; email?: string; sdt?: string; phone?: string }>,
     jdName: string,
     onLog?: (msg: string) => void
-  ): Promise<void> {
+  ): Promise<SavedScreeningBoard | undefined> {
     if (results.length === 0) return;
 
     // Bóc tách tên vị trí từ tên file JD linh hoạt (hỗ trợ mọi định dạng file, tiền tố, hậu tố)
@@ -1232,7 +1237,7 @@ ${content}
         };
       });
 
-      const batchRes = parseToolResponse(await this.app.callServerTool({
+      const batchRes = parseToolResult(await this.app.callServerTool({
         name: 'mcpapp.lists.batchCreateItems',
         arguments: { listId, items }
       }));
@@ -1273,11 +1278,13 @@ ${content}
       }
 
       const createdCount = createdItems.length || items.length;
+      const savedBoard = { listId, listName };
       if (stuckTitles.length > 0) {
         if (onLog) onLog(`[Kanban] Đã tạo List "${listName}" và lưu ${createdCount} thẻ; ${stuckTitles.length} thẻ chưa chuyển được sang cột đích, đang nằm ở cột "Đầu vào": ${stuckTitles.join(', ')}`);
-        return;
+        return savedBoard;
       }
       if (onLog) onLog(`[Kanban] ✅ Đã tạo List "${listName}" và lưu ${createdCount} thẻ ứng viên vào đúng stage.`);
+      return savedBoard;
     } catch (err: any) {
       if (onLog) onLog(`[Kanban] Lỗi khi tạo Kanban: ${err.message}`);
       throw err;
