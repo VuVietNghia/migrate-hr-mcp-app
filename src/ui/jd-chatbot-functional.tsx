@@ -6,6 +6,10 @@ import { createOrUpdateFile, describeFeatureError, readRoomFileText } from './pr
 import { buildCompactJDChatHistory } from './jd-chat-history';
 import { JDChatbotHeader } from './jd-chatbot-header';
 import { JDChatbotCompanyOption, JDChatbotComposer, JDChatbotEditButton } from './jd-chatbot-interaction-controls';
+import {
+  resolveIntentJD,
+  type StudioNavigationIntent,
+} from './studio/studio-navigation-intent';
 
 type Message = { role: 'user' | 'ai'; content: string };
 const hello: Message = { role: 'ai', content: 'Chào bạn! Tôi là trợ lí AI giúp bạn tạo và chỉnh sửa JD. Bạn cần tôi giúp gì ạ?' };
@@ -65,10 +69,15 @@ function renderJDMarkdown(content: string, changedLines: Set<number>) {
  */
 const EDITABLE_JD_FILE = /\.md$/i;
 
-export default function JDChatbotFunctional() {
+interface JDChatbotFunctionalProps {
+  navigationIntent?: StudioNavigationIntent | null;
+}
+
+export default function JDChatbotFunctional({ navigationIntent = null }: JDChatbotFunctionalProps = {}) {
   const app = usePrivosApp(); const { roomId } = usePrivosContext(); const service = useRef<PipelineService>();
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const jdLoadRequestRef = useRef(0);
+  const handledNavigationSequenceRef = useRef(0);
   const [jds, setJds] = useState<CVFile[]>([]); const [selected, setSelected] = useState<CVFile | null>(null);
   const [draft, setDraft] = useState(''); const [saved, setSaved] = useState(''); const [changedJDLines, setChangedJDLines] = useState<Set<number>>(new Set()); const [messages, setMessages] = useState<Message[]>([hello]);
   const [input, setInput] = useState(''); const [open, setOpen] = useState(false); const [librarySearch, setLibrarySearch] = useState(''); const [busy, setBusy] = useState(false); const [editing, setEditing] = useState(false); const [exitConfirmOpen, setExitConfirmOpen] = useState(false); const [jdLoading, setJDLoading] = useState(false); const [jdLoadError, setJDLoadError] = useState<string | null>(null); const [isSaving, setIsSaving] = useState(false); const [includeCompany, setIncludeCompany] = useState(false); const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -80,6 +89,29 @@ export default function JDChatbotFunctional() {
   const save = async (content: string, name = selected?.name) => { if (!content.trim() || !name || isSaving) return; setIsSaving(true); setSaveMessage(null); try { await createOrUpdateFile(app, `${roomId}/hr-miniapp/jds/${name}`, content); const files = await refresh(); setSelected(files.find(jd => jd.name === name) || selected); setSaved(content); setEditing(false); setSaveMessage({ type: 'success', text: '✓ Đã lưu thay đổi.' }); window.setTimeout(() => setSaveMessage(null), 2000); } catch (error) { setSaveMessage({ type: 'error', text: `Không thể lưu JD: ${error instanceof Error ? error.message : String(error)}` }); } finally { setIsSaving(false); } };
   const send = async () => { if (!input.trim() || !service.current || busy) return; const next = [...messages, { role: 'user' as const, content: input }]; setMessages(next); setInput(''); setBusy(true); const history = buildCompactJDChatHistory(next); const existing = selected ? `\nJD đang chỉnh sửa, giữ tên <saved_file>${selected.name}</saved_file>:\n${draft}` : ''; const companyInstruction = !includeCompany ? '\nKhông thêm thông tin công ty vào JD.' : selected ? '\nTHÔNG TIN CÔNG TY (bắt buộc trong lượt này): chỉ được dùng công cụ ĐỌC (liệt kê/đọc file) với các tài liệu trong Room Files/hr-miniapp/company, rồi thêm mục “Thông tin công ty” ngắn gọn vào JD đang chỉnh sửa (nếu JD đã có mục này thì cập nhật theo tài liệu) và điều chỉnh yêu cầu tuyển dụng phù hợp với công ty. Người dùng đã chủ động yêu cầu thay đổi này nên nó là ngoại lệ của quy tắc giữ nguyên nội dung; phải trả lại JD đầy đủ trong <jd_content>...</jd_content> kể cả khi tin nhắn của người dùng không nhắc đến công ty. TUYỆT ĐỐI không ghi, sửa, tạo hay lưu bất kỳ file nào (kể cả file JD) — người dùng tự bấm “Lưu thay đổi” trên giao diện.' : '\nKhi tạo JD trong lượt này, bắt buộc đọc Room Files/hr-miniapp/company (chỉ đọc, không ghi hay lưu file nào), thêm mục “Thông tin công ty” ngắn gọn và điều chỉnh yêu cầu tuyển dụng phù hợp với công ty.'; const editInstruction = selected ? '\nQUY TẮC CHỈNH SỬA: Khi người dùng nói “thêm”, “bổ sung”, “cộng thêm” hoặc “mở rộng”, phải giữ nguyên toàn bộ thông tin cũ và chỉ thêm thông tin mới vào đúng mục; tuyệt đối không xóa giá trị cũ. Ví dụ, thêm địa điểm Hà Nội vào địa điểm hiện có phải giữ cả địa điểm cũ và Hà Nội. Chỉ được xóa hoặc thay thế khi người dùng nói rõ “xóa”, “bỏ”, “thay”, hoặc “đổi từ ... thành ...”. Mọi nội dung không được yêu cầu thay đổi phải giữ nguyên.' : ''; const prompt = `[SYSTEM AUTOMATION] Bạn là AI Chatbot tuyển dụng. Hỏi đến khi đủ Vị trí, Địa điểm, Mức lương, Yêu cầu/kinh nghiệm; thiếu thì không tạo JD. Khi đủ trả JD trong <jd_content>...</jd_content>, không dùng công cụ hay lưu file. Trước các thẻ nội bộ, trả lời 1-2 câu tự nhiên theo ngữ cảnh, nêu ngắn gọn điều bạn đã tạo hoặc chỉnh sửa. Trình bày JD chi tiết vừa phải: làm rõ mục tiêu, trách nhiệm chính, yêu cầu, kỹ năng, quyền lợi và cách ứng tuyển; tránh lan man, lặp ý hoặc bịa thông tin. Bắt buộc trả đúng tên vị trí, không thêm “Tin tuyển dụng” hoặc nội dung JD, trong <position_name>...</position_name>. Trả tên theo mẫu JD_AI_TenVietHoa.md trong <saved_file>...</saved_file>; giao diện chỉ lưu vào hr-miniapp/jds.${companyInstruction}${editInstruction}${existing}\nLịch sử:\n${history}\nAI:`; try { const result = await service.current.askAI(prompt, undefined, undefined, undefined, `jd-chat-${Date.now()}`); const text = result?.text || 'Không nhận được phản hồi từ AI.'; setMessages(previous => [...previous, { role: 'ai', content: text }]); const content = text.match(/<jd_content>\s*([\s\S]*?)\s*<\/jd_content>/i)?.[1]?.trim(); const positionName = extractJDPositionName(text, content || ''); if (!selected && content) { const generatedName = formatGeneratedJDName(positionName); setDraft(content); setChangedJDLines(new Set()); setEditing(false); if (generatedName) await save(content, generatedName); else setSaveMessage({ type: 'error', text: 'Chưa nhận được tên vị trí hợp lệ nên JD chưa được lưu.' }); } else if (content) { setDraft(content); setChangedJDLines(getChangedJDLineIndexes(saved, content)); setEditing(false); } } catch (error) { setMessages(previous => [...previous, { role: 'ai', content: `Lỗi gửi AI: ${String(error)}` }]); } finally { setBusy(false); } };
   const fresh = () => { jdLoadRequestRef.current++; setSelected(null); setDraft(''); setSaved(''); setJDLoading(false); setJDLoadError(null); setMessages([hello]); setEditing(false); setExitConfirmOpen(false); setOpen(false); setIncludeCompany(false); };
+  useEffect(() => {
+    if (!navigationIntent || navigationIntent.target !== 'chatbotJD') return;
+    if (handledNavigationSequenceRef.current >= navigationIntent.sequence) return;
+    handledNavigationSequenceRef.current = navigationIntent.sequence;
+    if (!navigationIntent.jd) return;
+
+    const applyIntent = async () => {
+      try {
+        const files = await refresh();
+        const target = resolveIntentJD(navigationIntent, 'chatbotJD', files);
+        if (!target) {
+          setJDLoadError('JD đã bị xóa, không còn ở định dạng Markdown hoặc bạn không còn quyền đọc file này. Hãy chọn lại một JD.');
+          return;
+        }
+        await choose(target);
+      } catch (error) {
+        setJDLoadError(`Không thể tải danh sách JD: ${describeFeatureError(error, 'không đọc được Room Files.')}`);
+      }
+    };
+
+    void applyIntent();
+  }, [navigationIntent?.sequence]);
+
   const visibleJDs = jds.filter(jd => jd.name.toLowerCase().includes(librarySearch.trim().toLowerCase()));
   return <main className="jd-chatbot-page">
     <JDChatbotHeader busy={busy} onOpenLibrary={() => setOpen(true)} onCreateNew={fresh} />

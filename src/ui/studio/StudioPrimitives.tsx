@@ -57,6 +57,42 @@ interface StudioCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   children: ReactNode;
 }
 
+interface StudioMetricCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
+  label: ReactNode;
+  value: ReactNode | null;
+  description?: ReactNode;
+  icon?: ReactNode;
+  loading?: boolean;
+  error?: ReactNode;
+}
+
+export function StudioMetricCard({
+  className,
+  label,
+  value,
+  description,
+  icon,
+  loading = false,
+  error,
+  ...props
+}: StudioMetricCardProps) {
+  return (
+    <article
+      className={classes('studio-metric-card', className)}
+      aria-busy={loading || undefined}
+      {...props}
+    >
+      <div className={'studio-metric-card__copy'}>
+        <span className={'studio-metric-card__label'}>{label}</span>
+        <strong className={'studio-metric-card__value'}>{loading ? '…' : (value ?? '—')}</strong>
+        {error ? <span className={'studio-metric-card__error'} role={'status'}>{error}</span> : null}
+        {!error && description ? <span className={'studio-metric-card__description'}>{description}</span> : null}
+      </div>
+      {icon ? <span className={'studio-metric-card__icon'} aria-hidden={'true'}>{icon}</span> : null}
+    </article>
+  );
+}
+
 export function StudioCard({
   className,
   title,

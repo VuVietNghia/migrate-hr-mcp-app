@@ -2,15 +2,25 @@ import { describe, expect, it } from 'vitest';
 import {
   ALL_APP_TABS,
   buildStudioNavGroups,
+  createInitialMountedTabs,
   findStudioNavItem,
 } from '../src/ui/studio/studio-navigation';
 
 describe('Studio navigation model', () => {
+  it('mounts data-heavy recruitment tabs when the app starts', () => {
+    expect([...createInitialMountedTabs()]).toEqual([
+      'home',
+      'recruitment',
+      'pipeline',
+      'chatbotJD',
+    ]);
+  });
+
   it('matches the approved Studio grouping and order', () => {
     const groups = buildStudioNavGroups(false);
 
     expect(groups.map((group) => group.label)).toEqual([
-      'Không gian làm việc',
+      'Dữ liệu',
       'Tuyển dụng',
       'Nhân sự & hành chính',
     ]);

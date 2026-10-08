@@ -5,6 +5,7 @@ import {
   StudioCard,
   StudioDialog,
   StudioInlineState,
+  StudioMetricCard,
   StudioPage,
   StudioPageHeader,
   StudioToast,
@@ -61,5 +62,29 @@ describe('Studio primitives', () => {
     expect(html).toMatch(/aria-labelledby="[^"]+"/);
     expect(html).toContain('aria-label="Đóng"');
     expect(html).toContain('Nội dung tài liệu');
+  });
+
+  it('renders ready, loading and unavailable metric states accessibly', () => {
+    const ready = renderToStaticMarkup(createElement(StudioMetricCard, {
+      label: 'Ứng viên đã đánh giá',
+      value: 10,
+      description: 'Từ các đợt sàng lọc',
+    }));
+    const loading = renderToStaticMarkup(createElement(StudioMetricCard, {
+      label: 'Ứng viên đã đánh giá',
+      value: null,
+      loading: true,
+    }));
+    const failed = renderToStaticMarkup(createElement(StudioMetricCard, {
+      label: 'Ứng viên đã đánh giá',
+      value: null,
+      error: 'Không tải được',
+    }));
+
+    expect(ready).toContain('10');
+    expect(ready).toContain('Ứng viên đã đánh giá');
+    expect(loading).toMatch(/aria-busy=.true./);
+    expect(failed).toContain('—');
+    expect(failed).toContain('Không tải được');
   });
 });

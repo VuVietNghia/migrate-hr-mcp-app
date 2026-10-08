@@ -309,7 +309,7 @@ export default function CompanyHome() {
   return (
     <StudioPage className="company-studio-page">
       <StudioPageHeader
-        eyebrow="Không gian làm việc"
+        eyebrow="Dữ liệu"
         title="Dữ liệu công ty"
         description="Quản lý nguồn thông tin chung để các luồng AI và đội ngũ nhân sự luôn dùng đúng bối cảnh."
       />

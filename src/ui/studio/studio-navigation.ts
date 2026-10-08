@@ -12,6 +12,10 @@ export const ALL_APP_TABS = [
 
 export type AppTab = (typeof ALL_APP_TABS)[number];
 
+export function createInitialMountedTabs(): Set<AppTab> {
+  return new Set<AppTab>(['home', 'recruitment', 'pipeline', 'chatbotJD']);
+}
+
 export type StudioNavIcon =
   | 'building'
   | 'briefcase'
@@ -39,7 +43,7 @@ export interface StudioNavGroup {
 const NAV_GROUPS: readonly StudioNavGroup[] = [
   {
     id: 'workspace',
-    label: 'Không gian làm việc',
+    label: 'Dữ liệu',
     items: [
       { id: 'home', label: 'Dữ liệu công ty', breadcrumb: 'Dữ liệu công ty', icon: 'building' },
     ],

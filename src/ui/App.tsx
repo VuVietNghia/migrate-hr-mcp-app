@@ -22,7 +22,15 @@ import {
   resolveTabAfterPayrollRevocation,
 } from './payroll/access/payroll-navigation-policy';
 import { StudioShell } from './studio/StudioShell';
-import { buildStudioNavGroups, type AppTab } from './studio/studio-navigation';
+import {
+  buildStudioNavGroups,
+  createInitialMountedTabs,
+  type AppTab,
+} from './studio/studio-navigation';
+import {
+  nextStudioNavigationIntent,
+  type StudioNavigationIntent,
+} from './studio/studio-navigation-intent';
 
 declare global {
   interface Window {
@@ -51,7 +59,7 @@ const TAB_SECTIONS: { id: SectionId; label: string; tabs: TabDef[] }[] = [
     id: 'hr',
     label: 'HR',
     tabs: [
-      { id: 'recruitment', label: 'Tuyển dụng', scopes: ['files:read'] },
+      { id: 'recruitment', label: 'Tuyển dụng', scopes: ['files:read', 'lists:read'] },
       {
         id: 'pipeline',
         label: 'CV Pipeline',
@@ -87,7 +95,8 @@ function ThemedApp() {
   const app = usePrivosApp();
   const { theme, roomId, roomName, username, userRoles } = usePrivosContext();
   const [tab, setTab] = useState<Tab>('home');
-  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(() => new Set<Tab>(['home']));
+  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(createInitialMountedTabs);
+  const [navigationIntent, setNavigationIntent] = useState<StudioNavigationIntent | null>(null);
   const canAccessPayroll = usePayrollAccessPolling(app, userRoles);
   const payrollAccessRoles = canAccessPayroll ? ['owner'] : [];
   const navigationGroups = buildStudioNavGroups(canAccessPayroll);
@@ -126,6 +135,16 @@ function ThemedApp() {
     setVisitedTabs((prev) => (prev.has(selected) ? prev : new Set(prev).add(selected)));
   };
 
+  const handleNavigate = (
+    target: AppTab,
+    context?: Pick<StudioNavigationIntent, 'jd'>,
+  ) => {
+    if (!canSelectPayrollTab(target, payrollAccessRoles)) return;
+    setNavigationIntent((previous) => nextStudioNavigationIntent(previous, target, context));
+    setTab(target);
+    setVisitedTabs((previous) => previous.has(target) ? previous : new Set(previous).add(target));
+  };
+
   const panel = (id: Tab, node: ReactNode) =>
     visitedTabs.has(id) ? (
       <div className={tab === id ? 'app-tab-panel active' : 'app-tab-panel'} aria-hidden={tab !== id}>
@@ -147,10 +166,10 @@ function ThemedApp() {
           <CompanyHome />
         </div>
         {panel('email', <EmailTab active={tab === 'email'} />)}
-        {panel('recruitment', <RecruitmentPanel />)}
-        {panel('pipeline', <PipelineDashboard active={tab === 'pipeline'} />)}
+        {panel('recruitment', <RecruitmentPanel active={tab === 'recruitment'} onNavigate={handleNavigate} />)}
+        {panel('pipeline', <PipelineDashboard active={tab === 'pipeline'} navigationIntent={navigationIntent} />)}
         {panel('cvScored', <CVScoredTab active={tab === 'cvScored'} />)}
-        {panel('chatbotJD', <JDChatbotTab />)}
+        {panel('chatbotJD', <JDChatbotTab navigationIntent={navigationIntent} />)}
         {panel('lifecycle', <LifecycleDashboard active={tab === 'lifecycle'} />)}
         {canAccessPayroll &&
           panel(
