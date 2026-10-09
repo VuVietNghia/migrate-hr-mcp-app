@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findNewLists, readScreeningListIds, readScreeningLists, splitRemovedBoards } from '../src/ui/cv-scored/cv-list-presence';
+import { compareListsNewestFirst, findNewLists, readScreeningListIds, readScreeningLists, splitRemovedBoards } from '../src/ui/cv-scored/cv-list-presence';
 
 describe('readScreeningListIds', () => {
   it('đọc payload dạng mảng và dạng { lists }, chỉ lấy list SCREENING', () => {
@@ -63,5 +63,16 @@ describe('findNewLists', () => {
       { id: 'c', name: 'SCREENING_C', createdAt: '2026-09-18T03:00:00Z' },
     ];
     expect(findNewLists(lists, boards).map((l) => l._id || l.id)).toEqual(['c', 'b']);
+  });
+});
+
+describe('compareListsNewestFirst', () => {
+  it('does not let updatedAt change creation order', () => {
+    const values = [
+      { _id: 'old', name: 'SCREENING_OLD', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2030-01-01T00:00:00Z' },
+      { _id: 'new', name: 'SCREENING_NEW', createdAt: '2026-02-01T00:00:00Z', updatedAt: '2026-02-01T00:00:00Z' },
+    ];
+
+    expect(values.sort(compareListsNewestFirst).map((list) => list._id)).toEqual(['new', 'old']);
   });
 });

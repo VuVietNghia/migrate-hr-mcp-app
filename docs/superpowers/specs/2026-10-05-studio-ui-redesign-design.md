@@ -113,23 +113,50 @@ Các module chính của trang và điều hướng liên quan:
 - src/ui/jd-chatbot-functional.tsx
 - src/ui/studio/studio.css
 
+#### Trang Sàng lọc CV / Pipeline
+
+Trang này đã hoàn tất redesign theo `ui-ux-preview`, đã được build vào container, kiểm tra trực tiếp trên PrivOS và được người dùng xác nhận **ok** qua các vòng tinh chỉnh.
+
+- Đã thay phần trình bày cũ bằng layout Studio gồm header, flow strip, card Job Description, Hàng chờ CV, tiến độ và kết quả; logic ingest, parse, chấm điểm, lưu list `SCREENING` và cập nhật Kanban vẫn dùng luồng nghiệp vụ hiện có.
+- Hai nút `Tải CV` và `Đánh giá CV` ở góc trên đã bỏ; thao tác tải CV và bắt đầu chấm nằm trong đúng card nghiệp vụ.
+- Đã bỏ `Chỉnh với AI`, nút `Xem JD`, và toàn bộ chức năng `Tạo bằng form` khỏi Pipeline. Nút `Tải JD` nằm cạnh bộ chọn JD; bấm vào phần tên/tóm tắt JD đã chọn sẽ mở chi tiết.
+- Trình xem chi tiết JD tái sử dụng viewer của trang Công ty, hỗ trợ Markdown/text, PDF và DOCX bằng authenticated PrivOS content route.
+- Bộ chọn JD là custom listbox thay cho native `select`: phân nhóm JD thường/JD do AI tạo, trigger và popup bo góc, chữ gọn, focus không đổi màu border, hỗ trợ bàn phím, click ngoài để đóng và scrollbar mảnh.
+- Card Job Description hiển thị trạng thái thật theo `loadStatus`: `Chưa chọn JD`, `Đang nạp JD`, `Đã nạp JD` hoặc `Nạp JD thất bại`; trạng thái có `aria-live`.
+- Hàng chờ CV hiển thị tối đa ba dòng theo chiều cao rồi cuộn dọc; toàn bộ CV vẫn được giữ trong dữ liệu. Card Job Description giãn bằng chiều cao card Hàng chờ CV để không tạo khoảng trống bố cục.
+- Các thao tác chọn tất cả, bỏ chọn, xóa, tải CV và chấm điểm vẫn hoạt động. Cơ chế dừng chỉ dừng ở ranh giới CV/tác vụ an toàn, không hủy giữa một write.
+- Đã sửa lỗi `CV_NOT_PARSED` với CV đã parse: Pipeline tìm artefact trong synthetic `.markdown` view theo đúng nhánh thư mục nguồn, hỗ trợ cả tên artefact hiện tại và tên legacy, đọc text đã parse rồi mới đưa vào prompt. JD nhị phân PDF/DOCX cũng dùng cùng cơ chế thay vì chấm trên nội dung binary.
+- CTA `Xem bảng ứng viên` chỉ xuất hiện sau khi kết quả đã được lưu và chuyển sang tab `Ứng viên` với đúng `{ listId, listName }`. Nếu list vừa tạo chưa đọc được ngay, màn hình đích chờ và thử tải lại trước khi mở đúng board.
+- Tab `Ứng viên` đã được mount và tải dữ liệu nền ngay khi mở app; không còn chờ đến lần đầu người dùng bấm tab. Polling nặng vẫn được ràng buộc theo trạng thái active.
+- App server đã báo manifest qua `descriptor.manifest`, lấy từ cùng nguồn `privos-app.json`; việc này xử lý thông báo cài đặt yêu cầu app server báo manifest mà không cần đổi luồng nghiệp vụ.
+
+Các module chính của trang và phần tích hợp liên quan:
+
+- src/ui/pipeline-dashboard.tsx
+- src/ui/pipeline/PipelineStudioSections.tsx
+- src/ui/pipeline/pipeline-view-model.ts
+- src/ui/parsed-cv-text.ts
+- src/ui/studio/studio-navigation-intent.ts
+- src/ui/cv-scored/CVScoredTab.tsx
+- src/ui/studio/studio-navigation.ts
+- src/manifest.ts
+- src/relay-transport.ts
+
 ### 0.2. Kiểm thử và triển khai gần nhất
 
 Kết quả xác minh gần nhất ngày 2026-10-08:
 
-- Các suite liên quan Recruitment, dialog và navigation đều đạt; lần chạy hồi quy theo trang đạt 25/25 test, lần xác minh cuối đạt 14/14 test.
+- Các suite liên quan Pipeline status/dropdown đạt 14/14 test; các test view-model, wiring, parse text, điều hướng sang Ứng viên và relay manifest cũng đạt trong các lần xác minh theo phạm vi.
 - `npm run typecheck:strict-unused`: đạt.
-- `npm run build`: đạt; Vite build và manifest lint hợp lệ.
-- Đã build lại image `privos-mcp-app-demo:local`, recreate riêng service `hr-app` và xác minh container chạy đúng image `sha256:442c5db01c97c78a1a5e1633d56cf683b1fab31126001557749da8ad0bab6bcc`.
-- Endpoint `/health` trả HTTP 200 với trạng thái `alive` ở mode `standalone-production`.
-- Người dùng đã kiểm tra trực tiếp các vòng sửa của trang `Vị trí tuyển dụng`, preload tab, chọn sẵn JD và hành vi đóng modal khi chuyển tab, sau đó xác nhận **ok**.
+- `npm run build`: đạt với 2281 module; Vite build và manifest lint hợp lệ.
+- Đã build lại image `privos-mcp-app-demo:local` và recreate service `hr-app`; Docker healthcheck hiện ở trạng thái `healthy`.
+- Endpoint `/health` và `/ready` đều trả HTTP 200. `descriptor.manifest` được tạo từ `privos-app.json`, vì vậy lỗi app server không báo manifest và trạng thái `MANIFEST_DRIFT` cũ không còn là blocker hiện tại.
+- Người dùng đã kiểm tra trực tiếp trên PrivOS các vòng sửa của trang `Vị trí tuyển dụng` và `Sàng lọc CV`, gồm custom JD dropdown, trạng thái nạp JD và điều hướng sang đúng bảng ứng viên, sau đó xác nhận **ok**.
 
-Full `npm test` hiện còn đúng 4 lỗi nền, không phát sinh từ Studio Shell, trang Công ty hoặc trang Vị trí tuyển dụng:
+Full `npm test` hiện còn đúng 4 lỗi nền, không phát sinh từ Studio Shell, trang Công ty, trang Vị trí tuyển dụng hoặc Pipeline:
 
 1. Hai lỗi tests/manifest.spec.ts do identity/package sau lần pull chưa đồng bộ.
 2. Hai lỗi tests/packaging.spec.ts vì môi trường Windows hiện tại không có /bin/bash.
-
-Container phục vụ MCP/giao diện và `/health` bình thường, nhưng `/ready` vẫn trả 503 với mã `MANIFEST_DRIFT`: digest local `sha256:337c71435646ae44f226f9e23a9c6c0d488923f22a2c1dd3d71c3c31eae2cf4e` khác digest đã pin lúc pairing `sha256:8137b34d064862d3b89307f0b155febeecec0df06bee98ef538effd668052c23`. Chưa thay đổi readiness trong phạm vi redesign; coi đây là vấn đề hạ tầng/runtime riêng nếu người dùng yêu cầu xử lý.
 
 Các test liên quan đã được bổ sung:
 
@@ -151,23 +178,31 @@ Các test liên quan đã được bổ sung:
 - tests/recruitment-studio.spec.ts
 - tests/recruitment-navigation.spec.ts
 - tests/studio-navigation-intent.spec.ts
+- tests/pipeline-view-model.spec.ts
+- tests/pipeline-studio-sections.spec.ts
+- tests/pipeline-jd-select-interaction.spec.ts
+- tests/pipeline-studio-wiring.spec.ts
+- tests/pipeline-file-list-errors.spec.ts
+- tests/pipeline-kanban-stage-move.spec.ts
+- tests/parsed-cv-text.spec.ts
+- tests/cv-scored-navigation-render.spec.ts
+- tests/relay-manifest-reporting.spec.ts
 
 ### 0.3. Chưa hoàn thành
 
-- Chưa redesign các feature screen theo thứ tự còn lại: Pipeline, Ứng viên, Trợ lý JD, Nhân sự/Vòng đời nhân sự, Bảng lương, Email và Soạn thảo.
-- Pipeline và Trợ lý JD mới chỉ được preload dữ liệu khi mở app và nhận navigation intent để chọn đúng JD; chưa được coi là đã hoàn thành redesign giao diện của mục 6.3 và 6.5.
-- Trang **Ứng viên** chưa thực hiện selector đợt tuyển dụng, newest-by-creation-time, chỉ tải/poll một list đang chọn và chỉ hiển thị một Kanban. Không được coi việc đổi nhãn navigation là hoàn thành mục 5 hoặc 6.4.
+- Chưa redesign các feature screen theo thứ tự còn lại: Ứng viên, Trợ lý JD, Nhân sự/Vòng đời nhân sự, Bảng lương, Email và Soạn thảo.
+- Trang **Ứng viên** đã preload dữ liệu khi app mở và nhận intent để mở đúng screening list từ Pipeline, nhưng chưa thực hiện đầy đủ selector đợt tuyển dụng, newest-by-creation-time, chỉ tải/poll một list đang chọn và chỉ hiển thị một Kanban. Không được coi phần tích hợp này là hoàn thành mục 5 hoặc 6.4.
 - src/ui/cv-scored/cv-list-presence.ts vẫn ưu tiên updatedAt/updated_at; logic này chưa đáp ứng quy tắc creation time trong mục 5.1 và phải được sửa khi bắt đầu trang Ứng viên.
-- Navigation intent cho JD từ `Vị trí tuyển dụng` sang Pipeline/Trợ lý JD đã hoạt động; intent cho `listId`, `candidateId` và luồng sang Ứng viên/Nhân sự chưa được triển khai đầy đủ.
+- Navigation intent cho JD từ `Vị trí tuyển dụng` sang Pipeline/Trợ lý JD và screening reference từ Pipeline sang `Ứng viên` đã hoạt động. Intent cho `candidateId` và luồng từ Ứng viên sang Nhân sự chưa được triển khai.
 - Full verification gate chưa xanh vì bốn lỗi môi trường/cấu hình đã ghi tại mục 0.2.
 
 ### 0.4. Điểm bắt đầu cho phiên tiếp theo
 
 1. Giữ nguyên toàn bộ worktree đang có; không reset hoặc ghi đè các thay đổi chưa commit.
 2. Không commit/push nếu người dùng chưa yêu cầu.
-3. Trang **Vị trí tuyển dụng** đã hoàn tất và đã nghiệm thu. Theo thứ tự tại mục 8, màn hình tiếp theo là **Pipeline / Sàng lọc CV**, trừ khi người dùng chỉ định màn hình khác.
+3. Trang **Vị trí tuyển dụng** và **Pipeline / Sàng lọc CV** đã hoàn tất và đã nghiệm thu. Theo thứ tự tại mục 8, màn hình tiếp theo là **Ứng viên**, trừ khi người dùng chỉ định màn hình khác.
 4. Đọc lại ui-ux-preview và tài liệu privos-dev-docs cho feature chuẩn bị sửa; giữ nguyên service/repository và luồng nghiệp vụ đang chạy.
-5. Tái sử dụng Studio Shell, token, primitive, navigation intent và cơ chế preload hiện có; không làm mất contract chọn sẵn JD từ trang Vị trí tuyển dụng.
+5. Tái sử dụng Studio Shell, token, primitive, navigation intent và cơ chế preload hiện có; không làm mất contract chọn sẵn JD từ trang Vị trí tuyển dụng hoặc mở đúng screening list từ Pipeline.
 6. Sau khi hoàn tất một trang, chạy test/typecheck/build phù hợp, triển khai để người dùng kiểm tra và dừng chờ xác nhận trước khi sang trang tiếp theo.
 
 ## 1. Mục tiêu
@@ -235,7 +270,7 @@ Ví dụ:
 
 Nếu định danh không còn tồn tại hoặc người dùng không có quyền, màn hình đích hiển thị lỗi có thể xử lý và quay về trạng thái hợp lệ gần nhất.
 
-Trạng thái triển khai ngày 2026-10-08: `StudioNavigationIntent` đã có `sequence`, `target` và định danh JD `{ fileId, fileName }`. Luồng từ `Vị trí tuyển dụng` sang `Sàng lọc CV` và `Trợ lý JD` đã resolve theo file id trước, chọn sẵn đúng JD và tránh xử lý lặp cùng một intent. Các định danh `listId`/`candidateId` trong thiết kế tổng thể vẫn là phần việc của các màn hình sau.
+Trạng thái triển khai ngày 2026-10-08: `StudioNavigationIntent` đã có `sequence`, `target`, định danh JD `{ fileId, fileName }` và screening reference `{ listId, listName }`. Luồng từ `Vị trí tuyển dụng` sang `Sàng lọc CV`/`Trợ lý JD` resolve theo file id, chọn sẵn đúng JD và tránh xử lý lặp cùng một intent. Luồng từ Pipeline sang `Ứng viên` mở đúng list vừa lưu, có chờ/thử tải lại khi list mới chưa xuất hiện ngay. Định danh `candidateId` và điều hướng sang Nhân sự vẫn là phần việc của các màn hình sau.
 
 Không thêm URL router chỉ để phục vụ việc đổi tab trong iframe. Có thể cân nhắc router sau nếu xuất hiện yêu cầu deep-link độc lập.
 
@@ -333,9 +368,12 @@ Tất cả text/control phải có độ tương phản đọc được; focus s
 
 ### 6.3. Pipeline
 
+**Trạng thái:** giao diện và các luồng hiện có của trang đã hoàn thành redesign, được triển khai và được người dùng nghiệm thu ngày 2026-10-08; xem chi tiết triển khai tại mục 0.1.
+
 - Giữ nguyên luồng ingest/phân tích/chấm điểm hiện tại.
 - Trình bày lại tiến độ, bước đang chạy, kết quả và lỗi.
 - “Dừng sau tác vụ hiện tại” đặt cờ dừng và chỉ dừng tại ranh giới tác vụ an toàn; không hủy giữa một write đang thực hiện và không để trạng thái nửa chừng.
+- Điều hướng kết quả sang đúng screening list trong tab `Ứng viên` đã hoàn thành; phần redesign đầy đủ của tab `Ứng viên` vẫn thuộc bước 4.
 
 ### 6.4. Ứng viên
 
@@ -390,7 +428,7 @@ Tất cả text/control phải có độ tương phản đọc được; focus s
 
 Thứ tự triển khai:
 
-Trạng thái ngày 2026-10-08: bước 1 và 2 đã hoàn thành, đã triển khai và được người dùng nghiệm thu; bước 3 là điểm tiếp tục mặc định.
+Trạng thái ngày 2026-10-08: bước 1, 2 và 3 đã hoàn thành, đã triển khai và được người dùng nghiệm thu; bước 4 là điểm tiếp tục mặc định.
 
 1. Studio Shell + Công ty.
 2. Tuyển dụng.

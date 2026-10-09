@@ -28,7 +28,7 @@ describe('CVScoredTab routes every stage move through the checked helpers', () =
 
   it('imports the invite-sent-outcome helpers for the post-invite-email path', () => {
     expect(tab).toContain(
-      "import { applyInviteSentToBoards, buildInviteSentMessage, moveInvitedCVToPendingStage } from './invite-sent-outcome';",
+      "import { applyInviteSentToBoard, buildInviteSentMessage, moveInvitedCVToPendingStage } from './invite-sent-outcome';",
     );
   });
 

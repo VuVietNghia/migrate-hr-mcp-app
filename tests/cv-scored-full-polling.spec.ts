@@ -5,39 +5,40 @@ import { describe, expect, it } from 'vitest';
 const tab = readFileSync(resolve(__dirname, '../src/ui/cv-scored/CVScoredTab.tsx'), 'utf8');
 const reader = readFileSync(resolve(__dirname, '../src/ui/cv-scored/cv-list-reader.ts'), 'utf8');
 const loader = readFileSync(resolve(__dirname, '../src/ui/cv-scored/cv-board-loader.ts'), 'utf8');
+const flow = readFileSync(resolve(__dirname, '../src/ui/cv-scored/candidate-board-flow.ts'), 'utf8');
 
 describe('CVScoredTab — poll làm mới đầy đủ board', () => {
   it('lần tải đầu và poll dùng chung một mapper', () => {
     expect(loader).toContain('mapItemsToCVProfiles(items, fMap, sMap)');
-    expect(tab).toContain('mapItemsToCVProfiles(items, board.fieldsMap, board.stagesMap)');
+    expect(tab).toContain('mapItemsToCVProfiles(items, current.fieldsMap, current.stagesMap)');
   });
 
   it('poll đọc toàn bộ item, không còn chỉ đọc cột', () => {
     expect(tab).not.toContain('readBoardStatuses');
     expect(reader).not.toContain('readBoardStatuses');
-    expect(tab).toContain('await fetchScreeningListItems(app, board.listId)');
+    expect(tab).toContain('await fetchScreeningListItems(app, listId)');
   });
 
   it('chỉ thay board khi có khác biệt', () => {
-    expect(tab).toContain('areCvListsEqual(board.cvs, snapshot.cvs)');
-    expect(tab).toContain('areStageMapsEqual(board.stagesMap, snapshot.stagesMap)');
+    expect(tab).toContain('areCvListsEqual(current.cvs, mapped.cvs)');
+    expect(tab).toContain('areStageMapsEqual(current.stagesMap, mapped.stagesMap)');
   });
 
   it('luồng gửi mail mời chặn poll trong lúc ghi', () => {
-    expect(tab).toContain('pollingGuardRef.current.beginMove(inviteCvId)');
-    expect(tab).toContain('pollingGuardRef.current.endMove(inviteCvId)');
+    expect(tab).toContain('pollingGuardRef.current.beginMove(inviteMutationKey)');
+    expect(tab).toContain('pollingGuardRef.current.endMove(inviteMutationKey)');
   });
 });
 
 describe('CVScoredTab — list bị xoá ngoài app', () => {
   it('poll hỏi Hub list nào còn và gỡ board của list đã bị xoá', () => {
     expect(tab).toContain("name: 'mcpapp.lists.getAll'");
-    expect(tab).toContain('readScreeningListIds(');
-    expect(tab).toContain('splitRemovedBoards(boards, liveIds)');
+    expect(tab).toContain('readScreeningLists(parsed)');
+    expect(tab).toContain('mergeScreeningBoardResults(previousBoards, sortedLists, result.boards)');
   });
 
   it('một list lỗi không chặn cập nhật các board khác', () => {
-    expect(tab).toContain('Promise.allSettled(');
+    expect(flow).toContain('Promise.allSettled(');
   });
 
   it('báo cho người dùng biết list đã bị xoá', () => {
@@ -48,9 +49,9 @@ describe('CVScoredTab — list bị xoá ngoài app', () => {
 
 describe('CVScoredTab — list mới tạo trên Hub', () => {
   it('poll dựng board cho list chưa có trên màn hình, dùng chung loader với loadData', () => {
-    expect(tab).toContain('findNewLists(liveLists, boards)');
-    expect(tab).toContain('loadScreeningBoard(app, list)');
-    expect(tab).toContain('loadedBoards.push(await loadScreeningBoard(app, targetList));');
+    expect(tab).toContain('if (!current) return loadScreeningBoard(app, list)');
+    expect(tab).toContain('(list) => loadScreeningBoard(app, list)');
+    expect(tab).toContain('loadScreeningScopeBoards(');
   });
 
   it('room chưa có board nào vẫn poll để phát hiện list đầu tiên', () => {

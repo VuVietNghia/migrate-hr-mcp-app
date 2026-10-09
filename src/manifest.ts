@@ -41,5 +41,6 @@ export function buildRelayAppDescriptor(): AppDescriptor {
     permissions: publisherManifest.permissions as readonly AppPermissionDescriptor[],
     manifestIcon: publisherManifest.icon,
     relayIcon: getAppIconDataUri(),
+    manifest: createManifest(),
   };
 }

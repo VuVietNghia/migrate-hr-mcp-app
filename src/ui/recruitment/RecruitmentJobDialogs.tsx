@@ -9,7 +9,7 @@ import {
 
 import type { RecruitmentDepartment } from '../recruitment-departments';
 import { StudioDialog, StudioInlineState } from '../studio/StudioPrimitives';
-import type { RecruitmentJob, RecruitmentJobDraft } from './recruitment-jobs';
+import type { StructuredRecruitmentJob, RecruitmentJobDraft } from './recruitment-jobs';
 
 interface RecruitmentJobFormDialogProps {
   open: boolean;
@@ -123,13 +123,13 @@ export function RecruitmentJobFormDialog({
 }
 
 interface RecruitmentJobDetailDialogProps {
-  job: RecruitmentJob | null;
+  job: StructuredRecruitmentJob | null;
   isDownloading: boolean;
   downloadError: string;
   onClose: () => void;
-  onDownload: (job: RecruitmentJob) => void;
-  onEditWithAI: (job: RecruitmentJob) => void;
-  onUseInPipeline: (job: RecruitmentJob) => void;
+  onDownload: (job: StructuredRecruitmentJob) => void;
+  onEditWithAI: (job: StructuredRecruitmentJob) => void;
+  onUseInPipeline: (job: StructuredRecruitmentJob) => void;
 }
 
 function LineList({ value }: { value: string }) {

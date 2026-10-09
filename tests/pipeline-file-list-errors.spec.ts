@@ -38,7 +38,7 @@ describe('CV Pipeline shows list and upload failures on screen', () => {
   });
 
   it('handleUploadCV catches a failed list refresh instead of leaving an unhandled rejection', () => {
-    const upload = block('const handleUploadCV = async', 'const handleUploadJD');
+    const upload = block('const handleUploadCV = async', 'const armDeleteCV');
     const catchStart = upload.search(/\}\s*catch\s*\(\w+\)\s*\{\s*\n\s*console\.error/);
     expect(catchStart).toBeGreaterThan(upload.indexOf('fetchAvailableFiles()'));
     expect(upload.slice(catchStart, upload.indexOf('} finally {'))).toContain('showToast(');

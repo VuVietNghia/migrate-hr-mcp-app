@@ -1,5 +1,5 @@
 import { moveCVToStage, type CVStageMoveApp } from './cv-stage-move';
-import type { CVBoardData } from './CVScoredTab';
+import type { CVBoardData } from './candidate-model';
 
 const INTERVIEW_PENDING_STATUS = '07_Chua_Phong_Van';
 const INTERVIEW_PENDING_LABEL = 'Chưa phỏng vấn';
@@ -49,7 +49,16 @@ export function applyInviteSentToBoards(
   customFields: unknown,
   stageMove: InviteStageMoveResult,
 ): CVBoardData[] {
-  return boards.map((board) => ({
+  return boards.map((board) => applyInviteSentToBoard(board, cvId, customFields, stageMove));
+}
+
+export function applyInviteSentToBoard(
+  board: CVBoardData,
+  cvId: string,
+  customFields: unknown,
+  stageMove: InviteStageMoveResult,
+): CVBoardData {
+  return {
     ...board,
     cvs: board.cvs.map((cv) => cv._id === cvId
       ? {
@@ -59,5 +68,5 @@ export function applyInviteSentToBoards(
           ...(stageMove.status === 'moved' ? { status: INTERVIEW_PENDING_STATUS } : {}),
         }
       : cv),
-  }));
+  };
 }

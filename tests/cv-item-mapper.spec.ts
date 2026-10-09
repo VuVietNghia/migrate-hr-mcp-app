@@ -7,6 +7,7 @@ const FIELDS = {
   f3: 'Lý do',
   f4: 'Email',
   f5: 'SĐT',
+  f6: 'Nhóm nghề',
 };
 
 describe('mapItemsToCVProfiles', () => {
@@ -22,6 +23,7 @@ describe('mapItemsToCVProfiles', () => {
           { fieldId: 'f3', value: 'Kinh nghiệm tốt' },
           { fieldId: 'f4', value: 'a@company.com' },
           { fieldId: 'f5', value: '0901234567' },
+          { fieldId: 'f6', value: 'Senior Product Designer' },
           { fieldId: 'interview_invite_sent', value: true },
         ],
       }],
@@ -39,6 +41,7 @@ describe('mapItemsToCVProfiles', () => {
       reason: 'Kinh nghiệm tốt',
       email: 'a@company.com',
       sdt: '0901234567',
+      position: 'Senior Product Designer',
       inviteMailSent: true,
     });
   });

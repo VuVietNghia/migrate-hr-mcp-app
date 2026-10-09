@@ -26,7 +26,7 @@ function fakeHub(overrides: { parseStatus?: string | null; markdownFiles?: any[]
     [`file-management.files.channel/${ROOM}`]: {
       files: overrides.markdownFiles ?? [
         { _id: 'smv1_f_other', name: 'CV_Test_TranVanTest.md' },
-        { _id: 'smv1_f_cv', name: 'NGUYỄN_VIỆT_HƯNG_Resume.md' },
+        { _id: 'smv1_f_cv', name: 'NGUYỄN_VIỆT_HƯNG_Resume.pdf.md' },
       ],
       total: 2,
     },
@@ -42,14 +42,27 @@ function fakeHub(overrides: { parseStatus?: string | null; markdownFiles?: any[]
 }
 
 describe('parsedMarkdownName', () => {
-  it('drops the extension and replaces spaces with underscores, like the Hub parser', () => {
-    expect(parsedMarkdownName('NGUYỄN VIỆT_HƯNG_Resume.pdf')).toBe('NGUYỄN_VIỆT_HƯNG_Resume.md');
-    expect(parsedMarkdownName('CV Vũ Việt Nghĩa-1.pdf')).toBe('CV_Vũ_Việt_Nghĩa-1.md');
+  it('keeps the source extension and replaces spaces with underscores, like the current Hub parser', () => {
+    expect(parsedMarkdownName('NGUYỄN VIỆT_HƯNG_Resume.pdf')).toBe('NGUYỄN_VIỆT_HƯNG_Resume.pdf.md');
+    expect(parsedMarkdownName('CV Vũ Việt Nghĩa-1.pdf')).toBe('CV_Vũ_Việt_Nghĩa-1.pdf.md');
   });
 
   it('matches a parsed file whose name uses decomposed Unicode', () => {
-    const files = [{ _id: 'x', name: 'NGUYỄN_VIỆT_HƯNG_Resume.md'.normalize('NFD') }];
+    const files = [{ _id: 'x', name: 'NGUYỄN_VIỆT_HƯNG_Resume.pdf.md'.normalize('NFD') }];
     expect(findParsedMarkdownFile(files, CV.name)?._id).toBe('x');
+  });
+
+  it('still matches legacy parsed files that dropped the source extension', () => {
+    const files = [{ _id: 'legacy', name: 'NGUYỄN_VIỆT_HƯNG_Resume.md' }];
+    expect(findParsedMarkdownFile(files, CV.name)?._id).toBe('legacy');
+  });
+
+  it('prefers the current artefact when both current and legacy names exist', () => {
+    const files = [
+      { _id: 'legacy', name: 'NGUYỄN_VIỆT_HƯNG_Resume.md' },
+      { _id: 'current', name: 'NGUYỄN_VIỆT_HƯNG_Resume.pdf.md' },
+    ];
+    expect(findParsedMarkdownFile(files, CV.name)?._id).toBe('current');
   });
 });
 
@@ -90,7 +103,7 @@ describe('readParsedCvText', () => {
 
   it('names the expected artefact when the parsed file is missing', async () => {
     const { app } = fakeHub({ markdownFiles: [{ _id: 'smv1_f_other', name: 'CV_Test_TranVanTest.md' }] });
-    await expect(readParsedCvText(app, ROOM, CV)).rejects.toThrow('.markdown/NGUYỄN_VIỆT_HƯNG_Resume.md');
+    await expect(readParsedCvText(app, ROOM, CV)).rejects.toThrow('.markdown/NGUYỄN_VIỆT_HƯNG_Resume.pdf.md');
   });
 
   it('reports a room without a .markdown folder as not parsed', async () => {

@@ -10,6 +10,7 @@ import jdGeneratorSkillRaw from './data/jd-generator-skill.md?raw';
 import { buildCandidateMarkdownFileName, extractCandidateNameFromMarkdown, formatKanbanItemTitle, withCvFileSuffix } from './pipeline-candidate-name';
 import { moveCVToStage } from './cv-scored/cv-stage-move';
 import { readParsedCvText, stripCvContentTags } from './parsed-cv-text';
+import { getScreeningListNameFromRecruitmentFile } from './recruitment/recruitment-uploaded-jobs';
 import {
   reconcileMarkdownAssessment,
   validateCvAssessment,
@@ -24,6 +25,11 @@ import { redactFileName } from './log-redaction';
  * the full ten minutes and then reported a timeout — the wrong cause.
  */
 const MAX_CONSECUTIVE_POLL_FAILURES = 10;
+
+export interface SavedScreeningBoard {
+  listId: string;
+  listName: string;
+}
 
 /**
  * `setTimeout` that also loses to an abort. The poll below runs for up to ten minutes; without
@@ -435,7 +441,7 @@ export class PipelineService {
     return false;
   }
 
-  async uploadJD(file: File): Promise<any> {
+  async uploadJD(file: File): Promise<CVFile> {
     const dataUri = await this.readAsDataUri(file);
 
     if (this.cachedJdsFolderId === undefined) {
@@ -474,10 +480,19 @@ export class PipelineService {
 
     const res: any = await Promise.race([uploadPromise, timeoutPromise]);
 
-    return {
-      _id: res?.file?._id || res?.file?.id || res?._id || res?.id,
-      name: finalName
-    };
+    const fileId = res?.file?._id || res?.file?.id || res?._id || res?.id;
+    if (fileId) {
+      return {
+        _id: fileId,
+        name: finalName,
+        size: file.size,
+        downloadUrl: res?.file?.downloadUrl || res?.downloadUrl,
+      };
+    }
+
+    const resolved = (await this.fetchAvailableJDs()).find((candidate) => candidate.name === finalName);
+    if (!resolved?._id) throw new Error('Không lấy được mã file JD sau khi tải lên.');
+    return resolved;
   }
 
   async uploadCV(file: File): Promise<CVFile> {
@@ -1018,38 +1033,10 @@ ${content}
     results: Array<{ originalName: string; normalizedName?: string; score?: number; category?: string; jobFamily?: string; reason?: string; email?: string; sdt?: string; phone?: string }>,
     jdName: string,
     onLog?: (msg: string) => void
-  ): Promise<void> {
+  ): Promise<SavedScreeningBoard | undefined> {
     if (results.length === 0) return;
 
-    // Bóc tách tên vị trí từ tên file JD linh hoạt (hỗ trợ mọi định dạng file, tiền tố, hậu tố)
-    let positionName = 'UNKNOWN';
-    if (jdName) {
-      // 1. Loại bỏ extension: .md, .pdf, .docx, .doc...
-      let cleaned = jdName.replace(/\.(md|pdf|docx|doc)$/i, '').trim();
-
-      // 2. Loại bỏ các hậu tố trùng lặp: (1), _1, -1...
-      cleaned = cleaned.replace(/(?:[\(_\-]\d+\)?)+$/, '').trim();
-
-      // 3. Loại bỏ các tiền tố phổ biến: JD_AI_, JD_, JD-, Job_Description_, Mo_ta_cong_viec_...
-      cleaned = cleaned.replace(/^(?:JD(?:[_\-\s]+(?:AI)?)?|Job[_\-\s]*Description|Mo[_\-\s]*ta[_\-\s]*cong[_\-\s]*viec)[_\-\s]*/i, '').trim();
-
-      if (cleaned.length > 0) {
-        positionName = cleaned;
-      }
-    }
-
-    // Chuẩn hóa: bỏ dấu tiếng Việt, ký tự đặc biệt -> gạch dưới, viết hoa
-    const cleanPosition = positionName
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/Đ/g, 'D')
-      .replace(/[^a-zA-Z0-9_]/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '')
-      .toUpperCase() || 'UNKNOWN';
-
-    const listName = `SCREENING_${cleanPosition}`;
+    const listName = getScreeningListNameFromRecruitmentFile(jdName);
     const fieldDefinitions = [
       { _id: 'tong_diem', name: 'Tổng điểm', type: 'NUMBER' },
       { _id: 'phan_loai', name: 'Phân loại', type: 'TEXT' },
@@ -1232,7 +1219,7 @@ ${content}
         };
       });
 
-      const batchRes = parseToolResponse(await this.app.callServerTool({
+      const batchRes = parseToolResult(await this.app.callServerTool({
         name: 'mcpapp.lists.batchCreateItems',
         arguments: { listId, items }
       }));
@@ -1273,11 +1260,13 @@ ${content}
       }
 
       const createdCount = createdItems.length || items.length;
+      const savedBoard = { listId, listName };
       if (stuckTitles.length > 0) {
         if (onLog) onLog(`[Kanban] Đã tạo List "${listName}" và lưu ${createdCount} thẻ; ${stuckTitles.length} thẻ chưa chuyển được sang cột đích, đang nằm ở cột "Đầu vào": ${stuckTitles.join(', ')}`);
-        return;
+        return savedBoard;
       }
       if (onLog) onLog(`[Kanban] ✅ Đã tạo List "${listName}" và lưu ${createdCount} thẻ ứng viên vào đúng stage.`);
+      return savedBoard;
     } catch (err: any) {
       if (onLog) onLog(`[Kanban] Lỗi khi tạo Kanban: ${err.message}`);
       throw err;

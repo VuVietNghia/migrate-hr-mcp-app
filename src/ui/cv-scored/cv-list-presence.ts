@@ -1,14 +1,7 @@
-/** List thô từ `mcpapp.lists.getAll`; chỉ các field dưới đây được đọc. */
-export interface ScreeningListRef {
-  _id?: string;
-  id?: string;
-  name: string;
-  updatedAt?: string;
-  updated_at?: string;
-  createdAt?: string;
-  created_at?: string;
-  [key: string]: unknown;
-}
+import { compareScreeningListsNewestFirst } from './candidate-selection-state';
+import type { ScreeningListRef } from './candidate-model';
+
+export type { ScreeningListRef } from './candidate-model';
 
 function listIdOf(list: { _id?: unknown; id?: unknown }): string {
   return typeof list._id === 'string' ? list._id : (typeof list.id === 'string' ? list.id : '');
@@ -40,10 +33,7 @@ export function readScreeningListIds(parsed: unknown): Set<string> | null {
 
 /** Mới cập nhật trước; thời gian bằng hoặc thiếu thì so id giảm dần. Cùng thứ tự loadData dùng. */
 export function compareListsNewestFirst(a: ScreeningListRef, b: ScreeningListRef): number {
-  const tA = new Date(a.updatedAt || a.updated_at || a.createdAt || a.created_at || 0).getTime();
-  const tB = new Date(b.updatedAt || b.updated_at || b.createdAt || b.created_at || 0).getTime();
-  if (tA !== tB && tA > 0 && tB > 0) return tB - tA;
-  return listIdOf(b).localeCompare(listIdOf(a));
+  return compareScreeningListsNewestFirst(a, b);
 }
 
 /** List SCREENING chưa có board trên màn hình (vừa tạo trên Hub), mới nhất trước. */

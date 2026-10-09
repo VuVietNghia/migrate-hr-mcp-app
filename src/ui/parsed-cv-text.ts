@@ -4,8 +4,9 @@
  * Scoring used to hand the Sandbox the raw file (`@Files:<room>/<cv.pdf>`) and rely on the
  * model reading the PDF itself. The Sandbox model no longer does, and has no PDF text tools,
  * so the pipeline now reads the parsed artefact and passes the text inline. The parser writes
- * `{roomId}/.markdown/{relative path}.md`, dropping the source extension and replacing spaces
- * with `_` (`NGUYỄN VIỆT_HƯNG_Resume.pdf` → `.markdown/NGUYỄN_VIỆT_HƯNG_Resume.md`).
+ * `{roomId}/.markdown/{relative path}.md`, retaining the source extension and replacing spaces
+ * with `_` (`NGUYỄN VIỆT_HƯNG_Resume.pdf` → `.markdown/NGUYỄN_VIỆT_HƯNG_Resume.pdf.md`).
+ * Older Hub versions dropped the source extension, so lookup keeps that legacy form as a fallback.
  */
 import type { McpApp } from '@privos_ai/app-react';
 import { getFileTextById, restCall } from './privos-rest';
@@ -66,13 +67,17 @@ export function stripCvContentTags(text: string): string {
 /** The file name the parser gives the extracted text of `fileName`. */
 export function parsedMarkdownName(fileName: string): string {
   const base = fileName.split('/').pop() || fileName;
-  const stem = base.replace(/\.[^.]+$/, '');
-  return `${stem.normalize('NFC').replace(/\s+/g, '_')}.md`;
+  return `${base.normalize('NFC').replace(/\s+/g, '_')}.md`;
 }
 
 export function findParsedMarkdownFile<T extends RoomFile>(files: T[], cvName: string): T | undefined {
-  const target = normalizeName(parsedMarkdownName(cvName));
-  return files.find(file => typeof file.name === 'string' && normalizeName(file.name) === target);
+  const currentTarget = normalizeName(parsedMarkdownName(cvName));
+  const base = cvName.split('/').pop() || cvName;
+  const legacyTarget = normalizeName(`${base.replace(/\.[^.]+$/, '').normalize('NFC').replace(/\s+/g, '_')}.md`);
+  const findByName = (target: string) => files.find(
+    file => typeof file.name === 'string' && normalizeName(file.name) === target,
+  );
+  return findByName(currentTarget) ?? findByName(legacyTarget);
 }
 
 function describeParseStatus(status: string, fileName: string, kind: ParsedDocumentKind): string {

@@ -13,9 +13,11 @@ import {
   RightOutlined,
   SearchOutlined,
   TeamOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 
 import { MarkdownPathContextBuilder } from './cv-context-builder';
+import { CompanyDocumentRepository } from './company/company-documents';
 import { createOrUpdateFile, readRoomFileText } from './privos-rest';
 import { PipelineService } from './pipeline-service';
 import {
@@ -34,6 +36,8 @@ import {
   RecruitmentJobDetailDialog,
   RecruitmentJobFormDialog,
 } from './recruitment/RecruitmentJobDialogs';
+import { RecruitmentJobUploadDialog } from './recruitment/RecruitmentJobUploadDialog';
+import { RecruitmentUploadedJobDialog } from './recruitment/RecruitmentUploadedJobDialog';
 import {
   EMPTY_RECRUITMENT_JOB_DRAFT,
   buildRecruitmentJobDocument,
@@ -44,7 +48,15 @@ import {
   parseRecruitmentJob,
   type RecruitmentJob,
   type RecruitmentJobDraft,
+  type StructuredRecruitmentJob,
 } from './recruitment/recruitment-jobs';
+import { AppDbRecruitmentJobFileRepository } from './recruitment/recruitment-job-file-repository';
+import {
+  RecruitmentJobMetadataSaveError,
+  submitRecruitmentJobUpload,
+  type UploadedRecruitmentFileRef,
+} from './recruitment/recruitment-job-upload';
+import { mergeRecruitmentJobs } from './recruitment/recruitment-uploaded-jobs';
 import { readRecruitmentJobDownload } from './recruitment/recruitment-job-download';
 import { loadEvaluatedCandidateCount } from './recruitment/recruitment-metrics';
 import {
@@ -81,6 +93,14 @@ export function resolveJobDetailAfterTabActivityChange(
   return active ? selectedJob : null;
 }
 
+export function shouldApplyRecruitmentPreviewResult(
+  requestId: number,
+  currentRequestId: number,
+  roomOperationCurrent: boolean,
+): boolean {
+  return roomOperationCurrent && requestId === currentRequestId;
+}
+
 interface RecruitmentJobPagerProps {
   page: number;
   pageCount: number;
@@ -115,11 +135,40 @@ export function RecruitmentJobPager({ page, pageCount, onPageChange }: Recruitme
   );
 }
 
+export function RecruitmentJobCard({ job, onOpen }: { job: RecruitmentJob; onOpen: (job: RecruitmentJob) => void }) {
+  if (job.kind === 'uploaded') {
+    const format = job.format === 'markdown' ? 'Markdown' : job.format === 'word' ? 'Word' : 'PDF';
+    return (
+      <article className="recruitment-studio-job-card recruitment-studio-job-card--uploaded">
+        <span className="recruitment-studio-job-card__department">{job.departmentLabel}</span>
+        <h3>{job.fileName}</h3>
+        <p>JD được người dùng tải lên từ máy</p>
+        <div className="recruitment-studio-job-card__meta"><span><FileTextOutlined /> {format}</span></div>
+        <button type="button" onClick={() => onOpen(job)}>Xem chi tiết <ArrowRightOutlined /></button>
+      </article>
+    );
+  }
+  return (
+    <article className="recruitment-studio-job-card">
+      <span className="recruitment-studio-job-card__department">{job.departmentLabel}</span>
+      <h3>{job.title}</h3>
+      <p>{job.summary || 'Chưa có mô tả ngắn cho vị trí này.'}</p>
+      <div className="recruitment-studio-job-card__location"><EnvironmentOutlined /> {job.location}</div>
+      <div className="recruitment-studio-job-card__meta">
+        <span><ClockCircleOutlined /> {job.employmentType}</span>
+        <strong>{job.salary}</strong>
+      </div>
+      <button type="button" onClick={() => onOpen(job)}>Xem chi tiết <ArrowRightOutlined /></button>
+    </article>
+  );
+}
+
 export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPanelProps) {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
   const roomContextRef = useRef({ app, roomId });
   const roomOperationRef = useRef<ReturnType<typeof createRecruitmentRoomOperation> | null>(null);
+  const previewRequestRef = useRef(0);
   roomContextRef.current = { app, roomId };
 
   const [departments, setDepartments] = useState<RecruitmentDepartment[]>(DEFAULT_DEPARTMENTS);
@@ -148,6 +197,17 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
   const [jobDepartmentKey, setJobDepartmentKey] = useState('');
   const [isSavingJD, setIsSavingJD] = useState(false);
   const [saveJDError, setSaveJDError] = useState('');
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadDepartmentKey, setUploadDepartmentKey] = useState('');
+  const [isUploadingJD, setIsUploadingJD] = useState(false);
+  const [uploadJDError, setUploadJDError] = useState('');
+  const [uploadedFileRef, setUploadedFileRef] = useState<UploadedRecruitmentFileRef | undefined>();
+  const [uploadCreatedAt, setUploadCreatedAt] = useState('');
+  const [previewText, setPreviewText] = useState('');
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
 
   const [showDepartmentForm, setShowDepartmentForm] = useState(false);
   const [departmentName, setDepartmentName] = useState('');
@@ -161,6 +221,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
 
   useEffect(() => {
     if (active) return;
+    previewRequestRef.current += 1;
     setSelectedJob((current) => resolveJobDetailAfterTabActivityChange(active, current));
     setDownloadJDError('');
   }, [active]);
@@ -180,6 +241,17 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
     setShowJobForm(false);
     setDraft(EMPTY_RECRUITMENT_JOB_DRAFT);
     setJobDepartmentKey('');
+    setShowUploadDialog(false);
+    setUploadFile(null);
+    setUploadDepartmentKey('');
+    setIsUploadingJD(false);
+    setUploadJDError('');
+    setUploadedFileRef(undefined);
+    setUploadCreatedAt('');
+    setPreviewText('');
+    setPreviewBlob(null);
+    setPreviewLoading(false);
+    setPreviewError('');
     setShowDepartmentForm(false);
     setDepartmentName('');
     setDepartmentError('');
@@ -231,7 +303,8 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
       try {
         const service = new PipelineService(app, roomId, new MarkdownPathContextBuilder());
         const departmentStore = new AppDbRecruitmentDepartmentStore(app, roomId);
-        const [files, storedDepartments] = await Promise.all([
+        const metadataRepository = new AppDbRecruitmentJobFileRepository(app, roomId);
+        const [files, storedDepartments, uploadedMetadata] = await Promise.all([
           service.fetchAvailableJDs(),
           departmentStore.list().catch((error: unknown) => {
             console.error('Failed to load recruitment departments from App Database', error);
@@ -240,9 +313,12 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
             }
             return [];
           }),
+          metadataRepository.list(),
         ]);
 
+        const uploadedIds = new Set(uploadedMetadata.map((item) => item.fileId));
         const parsedJobs = (await Promise.all(files.map(async (file) => {
+          if (uploadedIds.has(file._id)) return null;
           if (!/^JD_(?!AI_)/i.test(file.name)) return null;
           try {
             const content = await readRoomFileText(app, { _id: file._id, downloadUrl: file.downloadUrl });
@@ -251,7 +327,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
             console.warn(`[Recruitment] Không đọc được JD ${file.name}:`, error);
             return null;
           }
-        }))).filter((job): job is RecruitmentJob => job !== null);
+        }))).filter((job): job is StructuredRecruitmentJob => job !== null);
 
         const mergedDepartments = mergeRecruitmentDepartments(
           storedDepartments,
@@ -259,7 +335,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
         );
         if (!operation.isCurrent(roomContextRef.current)) return;
         setDepartments(mergedDepartments);
-        setJobs(parsedJobs);
+        setJobs(mergeRecruitmentJobs(files, parsedJobs, uploadedMetadata, mergedDepartments));
       } catch (error) {
         console.error('Failed to load recruitment data', error);
         if (operation.isCurrent(roomContextRef.current)) {
@@ -298,6 +374,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
   }, [department, isMobileJobGrid, jobs, query]);
 
   const selectDepartment = (key: DepartmentFilter) => {
+    previewRequestRef.current += 1;
     setDepartment(key);
     setSelectedJob(null);
     setDownloadJDError('');
@@ -314,9 +391,42 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
     setShowJobForm(true);
   };
 
-  const openJobDetail = (job: RecruitmentJob) => {
+  const openJobDetail = async (job: RecruitmentJob) => {
+    const previewRequestId = ++previewRequestRef.current;
     setDownloadJDError('');
     setSelectedJob(job);
+    setPreviewText('');
+    setPreviewBlob(null);
+    setPreviewError('');
+    if (job.kind !== 'uploaded') return;
+    if (!app || !roomId) {
+      setPreviewError('Không thể xem JD vì chưa kết nối PrivOS.');
+      return;
+    }
+    const operation = roomOperationRef.current;
+    const previewIsCurrent = () => shouldApplyRecruitmentPreviewResult(
+      previewRequestId,
+      previewRequestRef.current,
+      Boolean(operation?.isCurrent(roomContextRef.current)),
+    );
+    setPreviewLoading(true);
+    try {
+      if (job.format === 'markdown') {
+        const text = await readRoomFileText(app, { _id: job.fileId, downloadUrl: job.downloadUrl });
+        if (previewIsCurrent()) setPreviewText(text);
+      } else {
+        const { blob } = await new CompanyDocumentRepository(app, roomId).readBlob({
+          id: job.fileId,
+          name: job.fileName,
+          downloadUrl: job.downloadUrl,
+        });
+        if (previewIsCurrent()) setPreviewBlob(blob);
+      }
+    } catch (error) {
+      if (previewIsCurrent()) setPreviewError(`Không thể xem trước JD: ${errorMessage(error)}`);
+    } finally {
+      if (previewIsCurrent()) setPreviewLoading(false);
+    }
   };
 
   const downloadJob = async (job: RecruitmentJob) => {
@@ -330,12 +440,14 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
     setDownloadingJobId(job.fileId);
     setDownloadJDError('');
     try {
-      const { blob, fileName } = await readRecruitmentJobDownload(app, job);
+      const downloaded = job.kind === 'uploaded' && job.format !== 'markdown' && roomId
+        ? await new CompanyDocumentRepository(app, roomId).readBlob({ id: job.fileId, name: job.fileName, downloadUrl: job.downloadUrl })
+        : await readRecruitmentJobDownload(app, job);
       if (!operation?.isCurrent(roomContextRef.current)) return;
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(downloaded.blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = fileName;
+      anchor.download = downloaded.fileName;
       anchor.style.display = 'none';
       document.body.append(anchor);
       anchor.click();
@@ -347,6 +459,46 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
       }
     } finally {
       if (operation?.isCurrent(roomContextRef.current)) setDownloadingJobId(null);
+    }
+  };
+
+  const submitUploadedJob = async () => {
+    if (isUploadingJD || !uploadFile || !uploadDepartmentKey || !app || !roomId) return;
+    const operation = roomOperationRef.current;
+    if (!operation?.isCurrent(roomContextRef.current)) return;
+    if (!departments.some((item) => item.key === uploadDepartmentKey)) {
+      setUploadJDError('Phòng ban đã chọn không còn tồn tại. Vui lòng chọn lại.');
+      return;
+    }
+    setIsUploadingJD(true);
+    setUploadJDError('');
+    const createdAt = uploadCreatedAt || new Date().toISOString();
+    if (!uploadCreatedAt) setUploadCreatedAt(createdAt);
+    try {
+      const service = new PipelineService(app, roomId, new MarkdownPathContextBuilder());
+      await submitRecruitmentJobUpload({
+        file: uploadFile,
+        departmentKey: uploadDepartmentKey,
+        createdAt,
+        uploadedFile: uploadedFileRef,
+      }, {
+        upload: (file) => service.uploadJD(file),
+        listFiles: () => service.fetchAvailableJDs(),
+        upsert: (metadata) => new AppDbRecruitmentJobFileRepository(app, roomId).upsert(metadata),
+      });
+      if (!operation.isCurrent(roomContextRef.current)) return;
+      setShowUploadDialog(false);
+      setUploadFile(null);
+      setUploadDepartmentKey('');
+      setUploadedFileRef(undefined);
+      setUploadCreatedAt('');
+      setReloadSequence((value) => value + 1);
+    } catch (error) {
+      if (!operation.isCurrent(roomContextRef.current)) return;
+      if (error instanceof RecruitmentJobMetadataSaveError) setUploadedFileRef(error.file);
+      setUploadJDError(errorMessage(error));
+    } finally {
+      if (operation.isCurrent(roomContextRef.current)) setIsUploadingJD(false);
     }
   };
 
@@ -465,10 +617,22 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
         description="Tổ chức phòng ban và quản lý mô tả công việc trong Room của bạn."
         actions={(
           <>
-            <button type="button" className="studio-button studio-button--secondary" onClick={() => setShowDepartmentForm(true)}>
+            <button type="button" className="studio-button studio-button--secondary recruitment-studio-header-action" onClick={() => setShowDepartmentForm(true)}>
               <ApartmentOutlined /> Phòng ban
             </button>
-            <button type="button" className="studio-button studio-button--primary" onClick={openJobForm} disabled={departments.length === 0}>
+            <button
+              type="button"
+              className="studio-button studio-button--secondary recruitment-studio-header-action"
+              onClick={() => {
+                setUploadDepartmentKey(getInitialJobDepartmentKey(department));
+                setUploadJDError('');
+                setShowUploadDialog(true);
+              }}
+              disabled={departments.length === 0}
+            >
+              <UploadOutlined /> Tải JD
+            </button>
+            <button type="button" className="studio-button studio-button--primary recruitment-studio-header-action" onClick={openJobForm} disabled={departments.length === 0}>
               <PlusOutlined /> Tạo JD thủ công
             </button>
           </>
@@ -570,17 +734,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
             <>
               <div className="recruitment-studio-job-grid">
                 {paginatedJobs.jobs.map((job) => (
-                  <article className="recruitment-studio-job-card" key={job.fileId}>
-                    <span className="recruitment-studio-job-card__department">{job.departmentLabel}</span>
-                    <h3>{job.title}</h3>
-                    <p>{job.summary || 'Chưa có mô tả ngắn cho vị trí này.'}</p>
-                    <div className="recruitment-studio-job-card__location"><EnvironmentOutlined /> {job.location}</div>
-                    <div className="recruitment-studio-job-card__meta">
-                      <span><ClockCircleOutlined /> {job.employmentType}</span>
-                      <strong>{job.salary}</strong>
-                    </div>
-                    <button type="button" onClick={() => openJobDetail(job)}>Xem chi tiết <ArrowRightOutlined /></button>
-                  </article>
+                  <RecruitmentJobCard key={job.fileId} job={job} onOpen={(selected) => void openJobDetail(selected)} />
                 ))}
               </div>
               <RecruitmentJobPager
@@ -618,12 +772,59 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
           }
         }}
       />
+      <RecruitmentJobUploadDialog
+        open={showUploadDialog}
+        file={uploadFile}
+        departmentKey={uploadDepartmentKey}
+        departments={departments}
+        error={uploadJDError}
+        isSaving={isUploadingJD}
+        uploadedFile={uploadedFileRef}
+        onFileChange={(file) => {
+          setUploadFile(file);
+          setUploadedFileRef(undefined);
+          setUploadCreatedAt('');
+          setUploadJDError('');
+        }}
+        onDepartmentChange={setUploadDepartmentKey}
+        onSubmit={() => void submitUploadedJob()}
+        onClose={() => {
+          if (isUploadingJD) return;
+          setShowUploadDialog(false);
+          setUploadFile(null);
+          setUploadDepartmentKey('');
+          setUploadJDError('');
+          setUploadedFileRef(undefined);
+          setUploadCreatedAt('');
+        }}
+      />
       <RecruitmentJobDetailDialog
-        job={selectedJob}
+        job={selectedJob?.kind === 'structured' ? selectedJob : null}
         isDownloading={Boolean(selectedJob && downloadingJobId === selectedJob.fileId)}
         downloadError={downloadJDError}
         onClose={() => {
+          previewRequestRef.current += 1;
           setSelectedJob(null);
+          setDownloadJDError('');
+        }}
+        onDownload={(job) => void downloadJob(job)}
+        onEditWithAI={(job) => onNavigate('chatbotJD', recruitmentJobNavigationContext(job))}
+        onUseInPipeline={(job) => onNavigate('pipeline', recruitmentJobNavigationContext(job))}
+      />
+      <RecruitmentUploadedJobDialog
+        job={selectedJob?.kind === 'uploaded' ? selectedJob : null}
+        text={previewText}
+        blob={previewBlob}
+        loading={previewLoading}
+        error={previewError}
+        isDownloading={Boolean(selectedJob && downloadingJobId === selectedJob.fileId)}
+        downloadError={downloadJDError}
+        onClose={() => {
+          previewRequestRef.current += 1;
+          setSelectedJob(null);
+          setPreviewText('');
+          setPreviewBlob(null);
+          setPreviewError('');
           setDownloadJDError('');
         }}
         onDownload={(job) => void downloadJob(job)}

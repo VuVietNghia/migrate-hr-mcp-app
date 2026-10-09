@@ -13,7 +13,7 @@ export const ALL_APP_TABS = [
 export type AppTab = (typeof ALL_APP_TABS)[number];
 
 export function createInitialMountedTabs(): Set<AppTab> {
-  return new Set<AppTab>(['home', 'recruitment', 'pipeline', 'chatbotJD']);
+  return new Set<AppTab>(['home', 'email', 'recruitment', 'pipeline', 'cvScored', 'chatbotJD']);
 }
 
 export type StudioNavIcon =
