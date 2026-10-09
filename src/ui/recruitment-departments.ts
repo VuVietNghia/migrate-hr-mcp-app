@@ -73,8 +73,9 @@ export function departmentKeyFromLabel(label: string): string {
 export function resolveJdDepartment(content: string): Pick<RecruitmentDepartment, 'key' | 'label'> {
   const metadataMatch = content.match(/<!--\s*DEPARTMENT_ID:\s*([^>]+?)\s*-->/i);
   const tableMatch = content.match(/\|\s*\*\*Phòng ban\*\*\s*\|\s*(.*?)\s*\|/i);
+  const boldListMatch = content.match(/^\s*[-*]\s+\*\*Phòng ban:\*\*\s*(.*)$/im);
   const legacyMatch = content.match(/^-\s*Phòng ban:\s*(.*)$/im);
-  const label = (tableMatch?.[1] || legacyMatch?.[1] || 'Khác').trim();
+  const label = (tableMatch?.[1] || boldListMatch?.[1] || legacyMatch?.[1] || 'Khác').trim();
   let key: string | undefined;
   for (const candidate of [metadataMatch?.[1]?.trim(), label]) {
     if (!candidate) continue;

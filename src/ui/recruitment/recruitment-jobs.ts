@@ -65,6 +65,29 @@ function legacyValue(content: string, label: string): string {
   return match?.[1]?.trim() ?? '';
 }
 
+function boldListValue(content: string, label: string): string {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = content.match(new RegExp(`^\\s*[-*]\\s+\\*\\*${escaped}:\\*\\*\\s*(.*)$`, 'im'));
+  return match?.[1]?.trim() ?? '';
+}
+
+function boldValue(content: string, label: string): string {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = content.match(new RegExp(
+    `^\\s*(?:[-*]\\s+)?\\*\\*${escaped}\\s*(?::\\s*)?\\*\\*\\s*:?\\s*(.+?)\\s*$`,
+    'im',
+  ));
+  return match?.[1]?.trim() ?? '';
+}
+
+function fieldValue(content: string, labels: string[]): string {
+  for (const label of labels) {
+    const value = tableValue(content, label) || boldValue(content, label) || legacyValue(content, label);
+    if (value) return value;
+  }
+  return '';
+}
+
 function sectionBody(content: string, heading: string): string {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = content.match(new RegExp(`^#{2,3}\\s*(?:\\d+\\.\\s*)?${escaped}\\s*\\r?\\n([\\s\\S]*?)(?=^#{2,3}\\s|^\\*{3}\\s*$|(?![\\s\\S]))`, 'im'));
@@ -72,8 +95,9 @@ function sectionBody(content: string, heading: string): string {
   return match[1]
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => /^[-*]\s+/.test(line))
+    .filter((line) => Boolean(line) && !/^(?:\*{3}|-{3,})$/.test(line))
     .map((line) => line.replace(/^[-*]\s+/, '').trim())
+    .map((line) => line.replace(/^\*\*(.+?):\*\*\s*/, '$1: '))
     .filter(Boolean)
     .join('\n');
 }
@@ -86,12 +110,16 @@ function firstMatch(content: string, patterns: RegExp[]): string {
   return '';
 }
 
+export function isStructuredRecruitmentJDFileName(name: string): boolean {
+  return /^JD_.+\.md$/i.test(name);
+}
+
 export function parseRecruitmentJob(file: CVFile, content: string): StructuredRecruitmentJob | null {
-  if (!/^JD_(?!AI_)/i.test(file.name)) return null;
+  if (!isStructuredRecruitmentJDFileName(file.name)) return null;
   const title = firstMatch(content, [
-    /^#\s+TUYỂN DỤNG:\s*(.*)$/im,
+    /^#\s+(?:THÔNG TIN\s+)?TUYỂN DỤNG:\s*(.*)$/im,
     /^#\s+(.*)$/m,
-  ]);
+  ]) || boldListValue(content, 'Vị trí');
   if (!title) return null;
 
   const department = resolveJdDepartment(content);
@@ -102,9 +130,11 @@ export function parseRecruitmentJob(file: CVFile, content: string): StructuredRe
     sectionBody(content, 'Học vấn'),
   ].filter(Boolean);
   const legacyRequirements = [
+    sectionBody(content, 'Yêu cầu ứng viên'),
     sectionBody(content, 'Yêu cầu'),
     sectionBody(content, 'Điểm cộng'),
   ].filter(Boolean);
+  const description = sectionBody(content, 'Mô tả công việc');
 
   return {
     kind: 'structured',
@@ -114,15 +144,24 @@ export function parseRecruitmentJob(file: CVFile, content: string): StructuredRe
     title,
     departmentKey: department.key,
     departmentLabel: department.label,
-    location: tableValue(content, 'Địa điểm làm việc') || legacyValue(content, 'Địa điểm') || 'Không xác định',
-    employmentType: tableValue(content, 'Thời gian làm việc') || legacyValue(content, 'Hình thức') || 'Thỏa thuận',
-    salary: tableValue(content, 'Mức lương') || legacyValue(content, 'Thu nhập') || 'Thỏa thuận',
-    summary: firstMatch(content, [/<!--\s*SUMMARY:\s*(.*?)\s*-->/i]) || legacyValue(content, 'Mô tả ngắn'),
-    description: sectionBody(content, 'Mô tả công việc'),
+    location: fieldValue(content, ['Địa điểm làm việc', 'Địa điểm']) || 'Không xác định',
+    employmentType: fieldValue(content, ['Thời gian làm việc', 'Hình thức làm việc', 'Hình thức']) || 'Thỏa thuận',
+    salary: fieldValue(content, ['Mức lương', 'Thu nhập']) || 'Thỏa thuận',
+    summary: firstMatch(content, [/<!--\s*SUMMARY:\s*(.*?)\s*-->/i])
+      || fieldValue(content, ['Mô tả ngắn', 'Tóm tắt'])
+      || description.split('\n')[0]
+      || '',
+    description,
     requirements: [...modernRequirements, ...legacyRequirements].join('\n'),
     benefits: sectionBody(content, 'Quyền lợi'),
-    contactEmail: firstMatch(content, [/\*\*Email nhận CV:\*\*\s*_?([^_\r\n]+)_?/i]),
-    emailSubject: firstMatch(content, [/\*\*Tiêu đề email:\*\*\s*_?([^_\r\n]+)_?/i]),
+    contactEmail: firstMatch(content, [
+      /\*\*Email nhận CV:\*\*\s*_?([^_\r\n]+)_?/i,
+      /^\s*[-*]\s+Gửi CV về email:\s*(.+)$/im,
+    ]),
+    emailSubject: firstMatch(content, [
+      /\*\*Tiêu đề email:\*\*\s*_?([^_\r\n]+)_?/i,
+      /^\s*[-*]\s+Tiêu đề email:\s*(.+)$/im,
+    ]),
   };
 }
 
