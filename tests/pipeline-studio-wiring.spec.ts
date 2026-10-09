@@ -60,6 +60,12 @@ describe('Pipeline Studio controller wiring', () => {
     const pipelinePanel = block(app, "panel('pipeline'", "panel('cvScored'");
     expect(pipelinePanel).toContain('onNavigate={handleNavigate}');
     expect(pipelinePanel).not.toContain('setTab(');
-    expect(app).toContain("<CVScoredTab active={tab === 'cvScored'} navigationIntent={navigationIntent} />");
+    expect(app).toContain("<CVScoredTab active={tab === 'cvScored'} navigationIntent={navigationIntent} onNavigate={handleNavigate} />");
+  });
+
+  it('routes Thêm JD to recruitment instead of uploading directly in Pipeline', () => {
+    expect(dashboard).not.toContain('const jdInputRef');
+    expect(dashboard).not.toContain('handleUploadJD');
+    expect(dashboard).toContain("onAddJD={() => onNavigate?.('recruitment')}");
   });
 });

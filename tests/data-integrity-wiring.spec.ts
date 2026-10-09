@@ -56,7 +56,7 @@ describe('Task 4: ten file danh gia gan hau to CV goc', () => {
   });
 
   it('onInvite bo hau to truoc khi dung ten', () => {
-    const onInvite = slice(cvScored, 'onInvite={(cv, posName) => {', 'setInviteCandidateName(cleanName)');
+    const onInvite = slice(cvScored, 'const handleCandidateInvite', 'setInviteCandidateName(cleanName)');
     expect(onInvite).toContain('stripCvFileSuffix(');
   });
 });

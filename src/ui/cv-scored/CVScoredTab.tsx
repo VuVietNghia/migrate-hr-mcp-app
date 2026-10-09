@@ -12,16 +12,12 @@ import { stripCvFileSuffix } from '../pipeline-candidate-name';
 import { usePolling } from '../hooks/usePolling';
 import { CVBoardPollingGuard } from './polling-sync';
 import { moveCVToStage } from './cv-stage-move';
-import { applyInviteSentToBoards, buildInviteSentMessage, moveInvitedCVToPendingStage } from './invite-sent-outcome';
+import { applyInviteSentToBoard, buildInviteSentMessage, moveInvitedCVToPendingStage } from './invite-sent-outcome';
 import { fetchScreeningListItems } from './cv-list-reader';
 import { mapItemsToCVProfiles } from './cv-item-mapper';
 import { areCvListsEqual, areStageMapsEqual } from './cv-poll-diff';
 import {
-  compareListsNewestFirst,
-  findNewLists,
-  readScreeningListIds,
   readScreeningLists,
-  splitRemovedBoards,
   type ScreeningListRef,
 } from './cv-list-presence';
 import { loadScreeningBoard } from './cv-board-loader';
@@ -40,19 +36,34 @@ import {
   screeningBoardRevealSequence,
   type StudioNavigationIntent,
 } from '../studio/studio-navigation-intent';
+import type { CandidateApplication, CVBoardData, CVProfile } from './candidate-model';
+import {
+  ALL_SCREENING_LISTS,
+  ScreeningRequestGuard,
+  reconcileScreeningListSelection,
+  screeningListId,
+  sortScreeningListsNewestFirst,
+} from './candidate-selection-state';
+import {
+  boardsForScreeningScope,
+  loadScreeningScopeBoards,
+  mergeScreeningBoardResults,
+  screeningMutationKey,
+  type ScreeningBoardsByListId,
+} from './candidate-board-flow';
+import type { AppTab } from '../studio/studio-navigation';
+import { CandidateStudioScreen, type CandidateViewMode } from './CandidateStudioViews';
+import { collectCandidateApplications, filterCandidates, getCandidateMetrics, resolveCandidateInvitePosition } from './candidate-view-model';
+import { CandidateDetailDialog } from './CandidateDetailDialog';
+import {
+  CandidateEvaluationRepository,
+  type CandidateEvaluationDocument,
+} from './candidate-evaluation';
+import { RoomMailAccountSummary } from '../mail-connection/RoomMailAccountSummary';
+import { loadCandidateRecruitmentJobsFromRoom } from './candidate-recruitment-jobs';
+import type { CandidateRecruitmentJob } from './candidate-view-model';
 
-export interface CVProfile {
-  _id: string;
-  name: string;
-  status: string; // stage name e.g. 02_Loai_CV
-  score?: number;
-  category?: string;
-  reason?: string;
-  email?: string;
-  sdt?: string;
-  customFields?: unknown;
-  inviteMailSent?: boolean;
-}
+export type { CVBoardData, CVProfile } from './candidate-model';
 
 function CVCard({ 
   cv, 
@@ -220,15 +231,6 @@ function CVColumn({
   );
 }
 
-export interface CVBoardData {
-  listId: string;
-  listName: string;
-  stagesMap: Record<string, string>;
-  /** fieldId -> tên field; poll cần để đọc lại điểm, phân loại, email, SĐT. */
-  fieldsMap: Record<string, string>;
-  cvs: CVProfile[];
-}
-
 export function CVBoard({ 
   board, 
   revealSequence,
@@ -240,8 +242,8 @@ export function CVBoard({
   board: CVBoardData, 
   revealSequence?: number,
   onMove: (listId: string, id: string, newStatus: string) => void, 
-  onInvite: (cv: CVProfile, posName?: string) => void,
-  onSelectDetail: (cv: CVProfile, listName: string) => void,
+  onInvite: (cv: CVProfile, listId: string, posName?: string) => void,
+  onSelectDetail: (cv: CVProfile, listId: string, listName: string) => void,
   isInviteSent: (id: string) => boolean
 }) {
   const boardRootRef = React.useRef<HTMLDivElement>(null);
@@ -313,8 +315,8 @@ export function CVBoard({
             cvs={board.cvs.filter(cv => cv.status === col.status || (col.status === '07_CV_Cu' && cv.status === '10_CV_Cu'))} 
             listName={board.listName}
             onMove={(id, newStatus) => onMove(board.listId, id, newStatus)} 
-            onInvite={(cv) => onInvite(cv, board.listName.replace(/^JD\s+/i, ''))}
-            onSelectDetail={onSelectDetail}
+            onInvite={(cv) => onInvite(cv, board.listId, board.listName.replace(/^JD\s+/i, ''))}
+            onSelectDetail={(cv, listName) => onSelectDetail(cv, board.listId, listName)}
             isInviteSent={isInviteSent}
           />
         ))}
@@ -395,9 +397,11 @@ function renderFormattedReason(reasonText: string) {
 export default function CVScoredTab({
   active = false,
   navigationIntent = null,
+  onNavigate,
 }: {
   active?: boolean;
   navigationIntent?: StudioNavigationIntent | null;
+  onNavigate?: (target: AppTab, context?: Pick<StudioNavigationIntent, 'lifecycle'>) => void;
 } = {}) {
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
@@ -407,18 +411,51 @@ export default function CVScoredTab({
   );
   
   const [searchQuery, setSearchQuery] = useState('');
-  const [boards, setBoards] = useState<CVBoardData[]>([]);
+  const [resultFilter, setResultFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<CandidateViewMode>('kanban');
+  const [screeningLists, setScreeningLists] = useState<ScreeningListRef[]>([]);
+  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  const [boardsByListId, setBoardsByListId] = useState<ScreeningBoardsByListId>({});
+  const boards = useMemo(
+    () => boardsForScreeningScope(screeningLists, selectedListId, boardsByListId),
+    [boardsByListId, screeningLists, selectedListId],
+  );
+  const evaluationRepository = useMemo(
+    () => app && roomId ? new CandidateEvaluationRepository(app, roomId) : null,
+    [app, roomId],
+  );
+  const [recruitmentJobs, setRecruitmentJobs] = useState<CandidateRecruitmentJob[]>([]);
+  const scopeCandidates = useMemo(() => collectCandidateApplications(boards, recruitmentJobs), [boards, recruitmentJobs]);
+  const filteredCandidates = useMemo(
+    () => filterCandidates(scopeCandidates, searchQuery, resultFilter),
+    [resultFilter, scopeCandidates, searchQuery],
+  );
+  const metrics = useMemo(() => getCandidateMetrics(scopeCandidates), [scopeCandidates]);
   const [loading, setLoading] = useState(false);
   const [targetBoardLoading, setTargetBoardLoading] = useState(false);
   const boardsRef = React.useRef<CVBoardData[]>([]);
+  const boardsByListIdRef = React.useRef<ScreeningBoardsByListId>({});
+  const screeningListsRef = React.useRef<ScreeningListRef[]>([]);
+  const selectedListIdRef = React.useRef<string | null>(null);
+  const screeningRequestGuardRef = React.useRef(new ScreeningRequestGuard());
   const handledNavigationSequenceRef = React.useRef(0);
   const candidateNavigationRequestRef = React.useRef(0);
   
   const [detailModalOpen, setDetailModalOpen] = useState(false);
-  const [selectedCVForDetail, setSelectedCVForDetail] = useState<{ cv: CVProfile; listName: string } | null>(null);
+  const [selectedCVForDetail, setSelectedCVForDetail] = useState<{ cv: CVProfile; listId: string; listName: string } | null>(null);
+  const [candidateEvaluation, setCandidateEvaluation] = useState<CandidateEvaluationDocument | null>(null);
+  const [candidateEvaluationLoading, setCandidateEvaluationLoading] = useState(false);
+  const [candidateEvaluationError, setCandidateEvaluationError] = useState<string | null>(null);
+  const evaluationRequestRef = React.useRef(0);
+  const detailCandidate = useMemo(() => {
+    if (!selectedCVForDetail) return null;
+    return scopeCandidates.find((candidate) =>
+      candidate.sourceListId === selectedCVForDetail.listId && candidate._id === selectedCVForDetail.cv._id
+    ) ?? null;
+  }, [scopeCandidates, selectedCVForDetail]);
 
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [selectedCVForInvite, setSelectedCVForInvite] = useState<CVProfile | null>(null);
+  const [selectedCVForInvite, setSelectedCVForInvite] = useState<{ cv: CVProfile; listId: string; listName: string } | null>(null);
   const [sentInviteCVIds, setSentInviteCVIds] = useState<Set<string>>(() => new Set());
   
   const [inviteCandidateName, setInviteCandidateName] = useState('');
@@ -454,6 +491,41 @@ export default function CVScoredTab({
   useEffect(() => {
     boardsRef.current = boards;
   }, [boards]);
+
+  useEffect(() => {
+    boardsByListIdRef.current = boardsByListId;
+  }, [boardsByListId]);
+
+  useEffect(() => {
+    screeningListsRef.current = screeningLists;
+  }, [screeningLists]);
+
+  useEffect(() => {
+    const requestId = ++evaluationRequestRef.current;
+    setCandidateEvaluation(null);
+    setCandidateEvaluationError(null);
+    if (!detailModalOpen || !detailCandidate || !evaluationRepository) {
+      setCandidateEvaluationLoading(false);
+      return;
+    }
+    setCandidateEvaluationLoading(true);
+    void evaluationRepository.resolve(detailCandidate.name)
+      .then(async (file) => {
+        if (!file) throw new Error('Không tìm thấy file đánh giá Markdown của ứng viên.');
+        return evaluationRepository.read(file);
+      })
+      .then((document) => {
+        if (requestId === evaluationRequestRef.current) setCandidateEvaluation(document);
+      })
+      .catch((error) => {
+        if (requestId === evaluationRequestRef.current) {
+          setCandidateEvaluationError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (requestId === evaluationRequestRef.current) setCandidateEvaluationLoading(false);
+      });
+  }, [detailCandidate?.applicationKey, detailModalOpen, evaluationRepository]);
 
   const inviteValidationError = getInviteEmailValidationError({
     candidateName: inviteCandidateName,
@@ -492,7 +564,8 @@ export default function CVScoredTab({
       // Poll đang chạy có thể mang dữ liệu trước khi ghi cờ đã gửi mail / đổi cột, rồi đè lên cập
       // nhật lạc quan bên dưới. Coi thao tác này như một lần kéo thẻ để guard chặn poll đó.
       const inviteCvId = cv._id;
-      const guardedInvite = pollingGuardRef.current.beginMove(inviteCvId);
+      const inviteMutationKey = screeningMutationKey(board.listId, inviteCvId);
+      const guardedInvite = pollingGuardRef.current.beginMove(inviteMutationKey);
       try {
         const updatedCustomFields = markInviteMailSent(cv.customFields);
         await restCall(app, 'POST', 'items.update', {
@@ -510,7 +583,16 @@ export default function CVScoredTab({
         if (stageMove.status === 'failed') {
           console.error('[CVScoredTab] Đã gửi mail mời nhưng không chuyển được CV sang cột Chưa phỏng vấn:', stageMove.detail);
         }
-        setBoards((previous) => applyInviteSentToBoards(previous, inviteCvId, updatedCustomFields, stageMove));
+        setBoardsByListId((previous) => {
+          const sourceBoard = previous[board.listId];
+          if (!sourceBoard) return previous;
+          const next = {
+            ...previous,
+            [board.listId]: applyInviteSentToBoard(sourceBoard, inviteCvId, updatedCustomFields, stageMove),
+          };
+          boardsByListIdRef.current = next;
+          return next;
+        });
         // The operator was already told the mail is on its way, so only the cases needing them to act
         // are worth interrupting for.
         if (!logged || stageMove.status === 'failed') {
@@ -520,7 +602,7 @@ export default function CVScoredTab({
         }
       } finally {
         if (guardedInvite) {
-          pollingGuardRef.current.endMove(inviteCvId);
+          pollingGuardRef.current.endMove(inviteMutationKey);
           void pollBoards(true);
         }
       }
@@ -528,7 +610,7 @@ export default function CVScoredTab({
       // Undo the optimistic badge so the card can be sent again.
       setSentInviteCVIds((previous) => {
         const next = new Set(previous);
-        next.delete(cv._id);
+        next.delete(screeningMutationKey(board.listId, cv._id));
         return next;
       });
       console.error('Lỗi gửi email:', err);
@@ -546,8 +628,8 @@ export default function CVScoredTab({
       return;
     }
 
-    const cv = selectedCVForInvite;
-    const selectedBoard = boards.find((board) => board.cvs.some((item) => item._id === cv._id));
+    const { cv, listId } = selectedCVForInvite;
+    const selectedBoard = boardsByListIdRef.current[listId];
     if (!selectedBoard) {
       showInviteToast('Lỗi gửi email: Không tìm thấy đợt tuyển dụng của CV này.', 'error');
       return;
@@ -571,7 +653,7 @@ export default function CVScoredTab({
     }
 
     // Set before the send settles so the card cannot queue a second copy; rolled back on failure.
-    setSentInviteCVIds((previous) => new Set(previous).add(cv._id));
+    setSentInviteCVIds((previous) => new Set(previous).add(screeningMutationKey(selectedBoard.listId, cv._id)));
     setInviteModalOpen(false);
     showInviteToast(`Email đang được gửi tới ${targetEmail} — theo dõi ở tab Email.`);
     void finishInviteSend(cv, selectedBoard, request);
@@ -579,8 +661,26 @@ export default function CVScoredTab({
 
   const inviteDateRef = React.useRef<HTMLInputElement>(null);
   const requestRef = React.useRef(0);
+  const loadedRoomIdRef = React.useRef(roomId);
   const pollingGuardRef = React.useRef(new CVBoardPollingGuard());
   const pendingPollRunnerRef = React.useRef<() => void>(() => {});
+
+  useEffect(() => {
+    if (loadedRoomIdRef.current === roomId) return;
+    loadedRoomIdRef.current = roomId;
+    requestRef.current += 1;
+    screeningRequestGuardRef.current.select(null);
+    selectedListIdRef.current = null;
+    screeningListsRef.current = [];
+    boardsByListIdRef.current = {};
+    setSelectedListId(null);
+    setScreeningLists([]);
+    setBoardsByListId({});
+    setRecruitmentJobs([]);
+    setBoardNotice(null);
+    setDetailModalOpen(false);
+    setInviteModalOpen(false);
+  }, [roomId]);
 
   useEffect(() => {
     if (!inviteModalOpen) {
@@ -643,54 +743,77 @@ export default function CVScoredTab({
     templateRepository,
   ]);
 
+  const commitSelectedScope = useCallback((scopeId: string | null) => {
+    screeningRequestGuardRef.current.select(scopeId);
+    selectedListIdRef.current = scopeId;
+    setSelectedListId(scopeId);
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!app || !roomId) return;
     const reqId = ++requestRef.current;
     pollingGuardRef.current.beginForegroundRefresh();
-    
     setLoading(true);
     try {
-      const res: any = await app.callServerTool({
-        name: 'mcpapp.lists.getAll',
-        arguments: { roomId }
-      });
-      const parsed = JSON.parse(res?.content?.[0]?.text || '{}');
-      const allLists = Array.isArray(parsed) ? parsed : (parsed.lists || []);
-      
-      // Get all screening lists and sort newest updated first
-      const targetLists = allLists
-        .filter((l: any) => (l.name || '').includes('SCREENING'))
-        .sort(compareListsNewestFirst);
-      
-      if (targetLists.length === 0) {
-        if (reqId === requestRef.current) {
-          setBoards([]);
-        }
+      const [parsed, jobs] = await Promise.all([
+        app.callServerTool({
+          name: 'mcpapp.lists.getAll',
+          arguments: { roomId },
+        }).then(parseToolResult),
+        loadCandidateRecruitmentJobsFromRoom(app, roomId).catch((error) => {
+          console.warn('[Candidates] Không tải được thông tin JD để hiển thị phòng ban:', error);
+          return [] as CandidateRecruitmentJob[];
+        }),
+      ]);
+      const liveLists = readScreeningLists(parsed);
+      if (!liveLists) throw new Error('Hub trả về danh sách đợt tuyển dụng không hợp lệ.');
+      const sortedLists = sortScreeningListsNewestFirst(liveLists);
+      const nextScope = reconcileScreeningListSelection(sortedLists, selectedListIdRef.current);
+
+      if (!nextScope) {
+        if (reqId !== requestRef.current) return;
+        screeningListsRef.current = [];
+        setScreeningLists([]);
+        commitSelectedScope(null);
+        boardsByListIdRef.current = {};
+        setBoardsByListId({});
         return;
       }
 
-      const loadedBoards: CVBoardData[] = [];
+      commitSelectedScope(nextScope);
+      const token = screeningRequestGuardRef.current.begin(nextScope);
+      const result = await loadScreeningScopeBoards(
+        sortedLists,
+        nextScope,
+        (list) => loadScreeningBoard(app, list),
+      );
+      if (
+        reqId !== requestRef.current
+        || !screeningRequestGuardRef.current.isCurrent(token, selectedListIdRef.current)
+      ) return;
 
-      for (const targetList of targetLists) {
-        loadedBoards.push(await loadScreeningBoard(app, targetList));
-      }
-      
-      if (reqId === requestRef.current) {
-        setBoards(loadedBoards);
-      }
+      screeningListsRef.current = sortedLists;
+      setScreeningLists(sortedLists);
+      setRecruitmentJobs(jobs);
+      setBoardsByListId((previous) => {
+        const next = mergeScreeningBoardResults(previous, sortedLists, result.boards);
+        boardsByListIdRef.current = next;
+        return next;
+      });
+      setBoardNotice(result.errors.length > 0
+        ? result.errors.map((error) => `Không tải được ${error.listName}: ${error.message}`).join(' ')
+        : null);
     } catch (err) {
       console.error(err);
       if (reqId === requestRef.current) {
-        setBoards([]);
+        setBoardNotice(`Không tải được dữ liệu ứng viên: ${err instanceof Error ? err.message : String(err)}`);
       }
     } finally {
       const shouldRunPendingPoll = pollingGuardRef.current.endForegroundRefresh();
-      if (reqId === requestRef.current) {
-        setLoading(false);
-      }
+      if (reqId === requestRef.current) setLoading(false);
       if (shouldRunPendingPoll) pendingPollRunnerRef.current();
     }
-  }, [app, roomId]);
+  }, [app, commitSelectedScope, roomId]);
 
   useEffect(() => {
     void loadData();
@@ -705,6 +828,7 @@ export default function CVScoredTab({
     const requestSequence = navigationIntent.sequence;
     setSearchQuery('');
     setTargetBoardLoading(true);
+    commitSelectedScope(screeningReference.listId);
 
     const openTargetBoard = async () => {
       try {
@@ -717,10 +841,16 @@ export default function CVScoredTab({
           12,
         );
         if (!target || candidateNavigationRequestRef.current !== requestSequence) return;
-        setBoards((previous) => {
-          const existingIndex = previous.findIndex((board) => board.listId === target.listId);
-          if (existingIndex < 0) return [target, ...previous];
-          return previous.map((board, index) => index === existingIndex ? target : board);
+        setBoardsByListId((previous) => {
+          const next = { ...previous, [target.listId]: target };
+          boardsByListIdRef.current = next;
+          return next;
+        });
+        setScreeningLists((previous) => {
+          if (previous.some((list) => screeningListId(list) === target.listId)) return previous;
+          const next = [...previous, { _id: target.listId, name: target.listName }];
+          screeningListsRef.current = next;
+          return next;
         });
         setBoardNotice(null);
       } catch (error) {
@@ -732,12 +862,10 @@ export default function CVScoredTab({
     };
 
     void openTargetBoard();
-  }, [active, app, navigationIntent?.sequence, roomId]);
+  }, [active, app, commitSelectedScope, navigationIntent?.sequence, roomId]);
 
-  // Mỗi lần poll dựng lại toàn bộ board từ item trên Hub: thẻ mới xuất hiện, thẻ bị xoá biến mất,
-  // mọi field được làm mới. Chỉ setBoards khi có khác biệt để không re-render mỗi 3 giây.
+  // Mỗi lần poll đọc metadata trước, sau đó chỉ đồng bộ board thuộc scope một đợt hoặc tất cả.
   const pollBoards = useCallback(async (required = false) => {
-    // Không thoát khi chưa có board: room trống vẫn phải phát hiện list đầu tiên được chấm.
     if (!app || !roomId) return;
     const pollId = required
       ? pollingGuardRef.current.requestPoll()
@@ -745,83 +873,69 @@ export default function CVScoredTab({
     if (pollId === null) return;
 
     try {
-      // Hỏi Hub list nào đang có: list bị xoá ngoài app phải biến mất, list vừa tạo (ví dụ Pipeline
-      // chấm JD mới) phải hiện lên. Lần gọi hỏng (liveLists = null) thì bỏ qua cả hai bước.
-      let liveLists: ScreeningListRef[] | null = null;
-      try {
-        liveLists = readScreeningLists(parseToolResult(await app.callServerTool({
-          name: 'mcpapp.lists.getAll',
-          arguments: { roomId },
-        })));
-      } catch (error) {
-        console.error('[CVScoredTab] Không đọc được danh sách list khi đồng bộ:', error);
-      }
-      const liveIds = liveLists ? readScreeningListIds(liveLists) : null;
-      const { kept, removed } = liveIds ? splitRemovedBoards(boards, liveIds) : { kept: boards, removed: [] };
-
-      const newLists = liveLists ? findNewLists(liveLists, boards) : [];
-      const added = (await Promise.allSettled(newLists.map((list) => loadScreeningBoard(app, list))))
-        .flatMap((result) => {
-          if (result.status === 'fulfilled') return [result.value];
-          console.error('[CVScoredTab] Không tải được list mới, sẽ thử lại ở lần poll sau:', result.reason);
-          return [];
-        });
-
-      // allSettled: một list lỗi chỉ bỏ qua board đó ở lần poll này, không chặn các board khác.
-      const results = await Promise.allSettled(kept.map(async (board) => {
-        const items = await fetchScreeningListItems(app, board.listId);
-        return { listId: board.listId, ...mapItemsToCVProfiles(items, board.fieldsMap, board.stagesMap) };
+      const parsed = parseToolResult(await app.callServerTool({
+        name: 'mcpapp.lists.getAll',
+        arguments: { roomId },
       }));
-      const snapshots = results.flatMap((result) => {
-        if (result.status === 'fulfilled') return [result.value];
-        console.error('[CVScoredTab] Không thể đồng bộ board CV:', result.reason);
-        return [];
+      const liveLists = readScreeningLists(parsed);
+      if (!liveLists) throw new Error('Hub trả về danh sách đợt tuyển dụng không hợp lệ.');
+      const sortedLists = sortScreeningListsNewestFirst(liveLists);
+      const previousLists = screeningListsRef.current;
+      const previousBoards = boardsByListIdRef.current;
+      const nextScope = reconcileScreeningListSelection(sortedLists, selectedListIdRef.current);
+
+      if (!nextScope) {
+        if (!pollingGuardRef.current.canApplyPoll(pollId)) return;
+        screeningListsRef.current = [];
+        setScreeningLists([]);
+        commitSelectedScope(null);
+        boardsByListIdRef.current = {};
+        setBoardsByListId({});
+        return;
+      }
+
+      commitSelectedScope(nextScope);
+      const scopeToken = screeningRequestGuardRef.current.begin(nextScope);
+      const result = await loadScreeningScopeBoards(sortedLists, nextScope, async (list) => {
+        const listId = screeningListId(list);
+        const current = previousBoards[listId];
+        if (!current) return loadScreeningBoard(app, list);
+        const items = await fetchScreeningListItems(app, listId);
+        const mapped = mapItemsToCVProfiles(items, current.fieldsMap, current.stagesMap);
+        if (areCvListsEqual(current.cvs, mapped.cvs) && areStageMapsEqual(current.stagesMap, mapped.stagesMap)) {
+          return current;
+        }
+        return { ...current, stagesMap: mapped.stagesMap, cvs: mapped.cvs };
       });
 
-      if (!pollingGuardRef.current.canApplyPoll(pollId)) return;
-      const removedIds = new Set(removed.map(board => board.listId));
-      const snapshotsByList = new Map(snapshots.map(snapshot => [snapshot.listId, snapshot]));
-      setBoards((previous) => {
-        let boardsChanged = false;
-        const nextBoards = previous.flatMap((board) => {
-          if (removedIds.has(board.listId)) {
-            boardsChanged = true;
-            return [];
-          }
-          const snapshot = snapshotsByList.get(board.listId);
-          if (!snapshot) return [board];
-          if (
-            areCvListsEqual(board.cvs, snapshot.cvs)
-            && areStageMapsEqual(board.stagesMap, snapshot.stagesMap)
-          ) {
-            return [board];
-          }
-          boardsChanged = true;
-          return [{ ...board, stagesMap: snapshot.stagesMap, cvs: snapshot.cvs }];
-        });
-        // Bỏ board đã có sẵn (loadData có thể vừa chạy xong); board mới lên đầu như khi bấm Làm mới.
-        const shownIds = new Set(nextBoards.map(board => board.listId));
-        const freshBoards = added.filter(board => !shownIds.has(board.listId));
-        if (freshBoards.length > 0) return [...freshBoards, ...nextBoards];
-        return boardsChanged ? nextBoards : previous;
-      });
-      const listNames = (changed: CVBoardData[]) => changed.map(board => `"${board.listName}"`).join(', ');
+      if (
+        !pollingGuardRef.current.canApplyPoll(pollId)
+        || !screeningRequestGuardRef.current.isCurrent(scopeToken, selectedListIdRef.current)
+      ) return;
+
+      screeningListsRef.current = sortedLists;
+      setScreeningLists(sortedLists);
+      const nextBoards = mergeScreeningBoardResults(previousBoards, sortedLists, result.boards);
+      boardsByListIdRef.current = nextBoards;
+      setBoardsByListId(nextBoards);
+
+      const oldIds = new Set(previousLists.map(screeningListId));
+      const liveIds = new Set(sortedLists.map(screeningListId));
+      const removedNames = previousLists.filter((list) => !liveIds.has(screeningListId(list))).map((list) => `"${list.name}"`);
+      const addedNames = sortedLists.filter((list) => !oldIds.has(screeningListId(list))).map((list) => `"${list.name}"`);
       const notices: string[] = [];
-      if (removed.length > 0) {
-        notices.push(`List ${listNames(removed)} đã bị xoá khỏi Hub nên đã được gỡ khỏi màn hình.`);
-      }
-      if (added.length > 0) {
-        notices.push(`Đã thêm list ${listNames(added)} vừa được tạo trên Hub.`);
+      if (removedNames.length > 0) notices.push(`List ${removedNames.join(', ')} đã bị xoá khỏi Hub nên đã được gỡ khỏi màn hình.`);
+      if (addedNames.length > 0) notices.push(`Đã phát hiện list ${addedNames.join(', ')} vừa được tạo trên Hub.`);
+      if (result.errors.length > 0) {
+        notices.push(result.errors.map((error) => `Không đồng bộ được "${error.listName}": ${error.message}`).join(' '));
       }
       if (notices.length > 0) setBoardNotice(notices.join(' '));
     } catch (error) {
       console.error('[CVScoredTab] Không thể đồng bộ board CV:', error);
     } finally {
-      if (pollingGuardRef.current.finishPoll(pollId)) {
-        pendingPollRunnerRef.current();
-      }
+      if (pollingGuardRef.current.finishPoll(pollId)) pendingPollRunnerRef.current();
     }
-  }, [app, boards, roomId]);
+  }, [app, commitSelectedScope, roomId]);
 
   useEffect(() => {
     pendingPollRunnerRef.current = () => { void pollBoards(); };
@@ -839,7 +953,7 @@ export default function CVScoredTab({
   const handleMove = async (listId: string, id: string, newStatus: string) => {
     if (!app) return;
     
-    const board = boards.find(b => b.listId === listId);
+    const board = boardsByListIdRef.current[listId];
     if (!board) return;
 
     // Find stageId for newStatus
@@ -849,39 +963,89 @@ export default function CVScoredTab({
     }
     if (!stageId) return;
 
-    if (!pollingGuardRef.current.beginMove(id)) return;
+    const mutationKey = screeningMutationKey(listId, id);
+    if (!pollingGuardRef.current.beginMove(mutationKey)) return;
     const previousStatus = board.cvs.find(cv => cv._id === id)?.status;
 
     // Optimistic
-    setBoards(prev => prev.map(b => {
-      if (b.listId === listId) {
-        return { ...b, cvs: b.cvs.map(cv => cv._id === id ? { ...cv, status: newStatus } : cv) };
-      }
-      return b;
-    }));
+    setBoardsByListId((previous) => {
+      const current = previous[listId];
+      if (!current) return previous;
+      const next = {
+        ...previous,
+        [listId]: { ...current, cvs: current.cvs.map(cv => cv._id === id ? { ...cv, status: newStatus } : cv) },
+      };
+      boardsByListIdRef.current = next;
+      return next;
+    });
 
     try {
       await moveCVToStage(app, id, stageId);
     } catch (err) {
       console.error(err);
       if (previousStatus) {
-        setBoards(prev => prev.map(b => {
-          if (b.listId === listId) {
-            return { ...b, cvs: b.cvs.map(cv => cv._id === id ? { ...cv, status: previousStatus } : cv) };
-          }
-          return b;
-        }));
+        setBoardsByListId((previous) => {
+          const current = previous[listId];
+          if (!current) return previous;
+          const next = {
+            ...previous,
+            [listId]: { ...current, cvs: current.cvs.map(cv => cv._id === id ? { ...cv, status: previousStatus } : cv) },
+          };
+          boardsByListIdRef.current = next;
+          return next;
+        });
       }
+      showInviteToast(`Không thể đổi trạng thái ứng viên: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
-      pollingGuardRef.current.endMove(id);
+      pollingGuardRef.current.endMove(mutationKey);
       void pollBoards(true);
     }
+  };
+
+  const handleScopeChange = (scopeId: string) => {
+    commitSelectedScope(scopeId);
+    setSearchQuery('');
+    void loadData();
+  };
+
+  const handleCandidateInvite = (candidate: CandidateApplication) => {
+    let cleanName = stripCvFileSuffix(candidate.name.replace(/.md$/i, ''));
+    const cvIndex = cleanName.indexOf('_CV_');
+    if (cvIndex !== -1) cleanName = cleanName.substring(cvIndex + 4);
+    cleanName = cleanName.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+    setSelectedCVForInvite({ cv: candidate, listId: candidate.sourceListId, listName: candidate.sourceListName });
+    setInviteCandidateName(cleanName);
+    setInvitePosition(resolveCandidateInvitePosition(candidate));
+    setInviteCompany('Công ty ABC');
+    setInviteEmail(candidate.email || '');
+    setInviteDate('');
+    setInviteModalOpen(true);
+  };
+
+  const handleCandidateDetail = (candidate: CandidateApplication) => {
+    setSelectedCVForDetail({ cv: candidate, listId: candidate.sourceListId, listName: candidate.sourceListName });
+    setDetailModalOpen(true);
+  };
+
+  const handleOpenEmployeeCreate = () => {
+    setDetailModalOpen(false);
+    onNavigate?.('lifecycle', { lifecycle: { openCreateForm: true } });
+  };
+
+  const handleDownloadEvaluation = () => {
+    if (!candidateEvaluation) return;
+    const url = URL.createObjectURL(new Blob([candidateEvaluation.fullMarkdown], { type: 'text/markdown;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = candidateEvaluation.file.fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   const displayedBoards = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     if (!q) return boards;
-    return boards.filter(b => b.listName.toLowerCase().includes(q));
+    return boards.filter((board) => board.listName.toLowerCase().includes(q));
   }, [boards, searchQuery]);
 
   const handleRefresh = () => {
@@ -890,7 +1054,58 @@ export default function CVScoredTab({
   };
 
   return (
+    <>
+      <CandidateStudioScreen
+        lists={screeningLists}
+        selectedListId={selectedListId ?? ALL_SCREENING_LISTS}
+        candidates={filteredCandidates}
+        metrics={metrics}
+        viewMode={viewMode}
+        searchQuery={searchQuery}
+        resultFilter={resultFilter}
+        loading={loading}
+        showCampaignLabel={selectedListId === ALL_SCREENING_LISTS}
+        notice={targetBoardLoading ? 'Đang tải đúng bảng ứng viên của JD vừa sàng lọc…' : boardNotice}
+        onDismissNotice={() => setBoardNotice(null)}
+        onScopeChange={handleScopeChange}
+        onSearchChange={setSearchQuery}
+        onResultFilterChange={setResultFilter}
+        onViewModeChange={setViewMode}
+        onRefresh={handleRefresh}
+        onMove={(identity, status) => void handleMove(identity.listId, identity.itemId, status)}
+        onInvite={handleCandidateInvite}
+        onDetail={handleCandidateDetail}
+        isInviteSent={(applicationKey) => sentInviteCVIds.has(applicationKey) || scopeCandidates.some((candidate) =>
+          candidate.applicationKey === applicationKey && candidate.inviteMailSent === true
+        )}
+      />
+      <CandidateDetailDialog
+        open={detailModalOpen}
+        candidate={detailCandidate}
+        stageOptions={selectedCVForDetail
+          ? Object.values(boardsByListId[selectedCVForDetail.listId]?.stagesMap || {}).map((status) => ({
+              value: status,
+              label: getCVColumnLabel(boardsByListId[selectedCVForDetail.listId]?.stagesMap || {}, status) || status,
+            }))
+          : []}
+        evaluation={candidateEvaluation}
+        evaluationLoading={candidateEvaluationLoading}
+        evaluationError={candidateEvaluationError}
+        onClose={() => setDetailModalOpen(false)}
+        onStageChange={(status) => {
+          if (detailCandidate) void handleMove(detailCandidate.sourceListId, detailCandidate._id, status);
+        }}
+        onInvite={() => {
+          if (!detailCandidate) return;
+          setDetailModalOpen(false);
+          handleCandidateInvite(detailCandidate);
+        }}
+        onOpenEmployeeCreate={handleOpenEmployeeCreate}
+        onDownload={handleDownloadEvaluation}
+      />
     <div className="hr-terminal-ui">
+      {false && (
+        <>
       <header className="hr-header-block">
         <div className="header-content">
           <h2 className="hr-title">CV đã chấm</h2>
@@ -946,7 +1161,7 @@ export default function CVScoredTab({
               board={board} 
               revealSequence={screeningBoardRevealSequence(navigationIntent, board)}
               onMove={handleMove} 
-              onInvite={(cv, posName) => {
+              onInvite={(cv, listId, posName) => {
                 let cleanName = stripCvFileSuffix(cv.name.replace(/\.md$/i, ''));
                 const cvIndex = cleanName.indexOf('_CV_');
                 if (cvIndex !== -1) {
@@ -957,7 +1172,7 @@ export default function CVScoredTab({
                 let cleanPos = posName || '';
                 cleanPos = cleanPos.replace(/^SCREENING_/i, '').replace(/_/g, ' ');
 
-                setSelectedCVForInvite(cv);
+                setSelectedCVForInvite({ cv, listId, listName: board.listName });
                 setInviteCandidateName(cleanName);
                 setInvitePosition(cleanPos);
                 setInviteCompany('Công ty ABC');
@@ -965,11 +1180,11 @@ export default function CVScoredTab({
                 setInviteDate('');
                 setInviteModalOpen(true);
               }}
-              onSelectDetail={(cv, listName) => {
-                setSelectedCVForDetail({ cv, listName });
+              onSelectDetail={(cv, listId, listName) => {
+                setSelectedCVForDetail({ cv, listId, listName });
                 setDetailModalOpen(true);
               }}
-              isInviteSent={(cvId) => sentInviteCVIds.has(cvId) || board.cvs.some((cv) =>
+              isInviteSent={(cvId) => sentInviteCVIds.has(screeningMutationKey(board.listId, cvId)) || board.cvs.some((cv) =>
                 cv._id === cvId && cv.inviteMailSent === true,
               )}
             />
@@ -977,6 +1192,8 @@ export default function CVScoredTab({
         </div>
       )}
 
+        </>
+      )}
       {/* CV Detail & AI Scoring Modal Popup */}
       {detailModalOpen && selectedCVForDetail && (
         <div
@@ -993,6 +1210,7 @@ export default function CVScoredTab({
             alignItems: 'center',
             justifyContent: 'center',
             padding: '20px'
+            ,visibility: 'hidden'
           }}
           onClick={() => setDetailModalOpen(false)}
         >
@@ -1088,7 +1306,7 @@ export default function CVScoredTab({
                 </span>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', marginTop: '4px' }}>
                   {getCVColumnLabel(
-                    boards.find((board) => board.cvs.some((cv) => cv._id === selectedCVForDetail.cv._id))?.stagesMap || {},
+                    boardsByListId[selectedCVForDetail.listId]?.stagesMap || {},
                     selectedCVForDetail.cv.status,
                   ) || selectedCVForDetail.cv.status}
                 </div>
@@ -1155,7 +1373,7 @@ export default function CVScoredTab({
               zIndex: 10000
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0 }}>Gửi thư mời phỏng vấn</h3>
               <button 
                 onClick={() => setInviteModalOpen(false)} 
@@ -1164,9 +1382,11 @@ export default function CVScoredTab({
               >
                 ✕
               </button>
-            </div>
+             </div>
 
-            {inviteTemplateLoading && (
+             <RoomMailAccountSummary app={app} roomId={roomId} active={inviteModalOpen} />
+
+             {inviteTemplateLoading && (
               <p role="status" style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: '13px' }}>
                 Đang tải mẫu email phỏng vấn…
               </p>
@@ -1278,5 +1498,6 @@ export default function CVScoredTab({
         </div>
       )}
     </div>
+    </>
   );
 }

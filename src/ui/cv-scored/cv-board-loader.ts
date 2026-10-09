@@ -1,4 +1,4 @@
-import type { CVBoardData } from './CVScoredTab';
+import type { CVBoardData } from './candidate-model';
 import type { ListItemPagingApp } from '../list-item-paging';
 import { fetchScreeningListItems } from './cv-list-reader';
 import { mapItemsToCVProfiles } from './cv-item-mapper';
@@ -81,6 +81,8 @@ export async function loadScreeningBoard(
   return {
     listId: lId,
     listName: targetList.name,
+    createdAt: targetList.createdAt,
+    created_at: targetList.created_at,
     stagesMap: mapped.stagesMap,
     fieldsMap: fMap,
     cvs: mapped.cvs,

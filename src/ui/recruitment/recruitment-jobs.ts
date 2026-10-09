@@ -1,7 +1,9 @@
 import type { CVFile } from '../pipeline-service';
 import { resolveJdDepartment } from '../recruitment-departments';
+import type { UploadedRecruitmentJob } from './recruitment-uploaded-jobs';
 
-export interface RecruitmentJob {
+export interface StructuredRecruitmentJob {
+  kind: 'structured';
   fileId: string;
   fileName: string;
   downloadUrl?: string;
@@ -18,6 +20,8 @@ export interface RecruitmentJob {
   contactEmail: string;
   emailSubject: string;
 }
+
+export type RecruitmentJob = StructuredRecruitmentJob | UploadedRecruitmentJob;
 
 export interface RecruitmentJobDraft {
   title: string;
@@ -82,7 +86,7 @@ function firstMatch(content: string, patterns: RegExp[]): string {
   return '';
 }
 
-export function parseRecruitmentJob(file: CVFile, content: string): RecruitmentJob | null {
+export function parseRecruitmentJob(file: CVFile, content: string): StructuredRecruitmentJob | null {
   if (!/^JD_(?!AI_)/i.test(file.name)) return null;
   const title = firstMatch(content, [
     /^#\s+TUYỂN DỤNG:\s*(.*)$/im,
@@ -103,6 +107,7 @@ export function parseRecruitmentJob(file: CVFile, content: string): RecruitmentJ
   ].filter(Boolean);
 
   return {
+    kind: 'structured',
     fileId: file._id,
     fileName: file.name,
     downloadUrl: file.downloadUrl,
@@ -237,13 +242,10 @@ export function filterRecruitmentJobs(
   return jobs.filter((job) => {
     if (departmentKey !== 'all' && job.departmentKey !== departmentKey) return false;
     if (!normalizedQuery) return true;
-    return searchable([
-      job.title,
-      job.departmentLabel,
-      job.location,
-      job.employmentType,
-      job.summary,
-    ].join(' ')).includes(normalizedQuery);
+    const values = job.kind === 'uploaded'
+      ? [job.fileName, job.departmentLabel]
+      : [job.title, job.departmentLabel, job.location, job.employmentType, job.summary];
+    return searchable(values.join(' ')).includes(normalizedQuery);
   });
 }
 

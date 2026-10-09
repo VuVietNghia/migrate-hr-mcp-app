@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, createElement, createRef } from 'react';
+import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PipelineJDPanel } from '../src/ui/pipeline/PipelineStudioSections';
@@ -24,6 +24,7 @@ describe('Pipeline JD custom select interactions', () => {
 
   it('opens, navigates with arrows, selects with Enter, and closes', async () => {
     const onSelect = vi.fn();
+    const onAddJD = vi.fn();
     await act(async () => {
       root.render(createElement(PipelineJDPanel, {
         jds: [
@@ -34,10 +35,9 @@ describe('Pipeline JD custom select interactions', () => {
         loadStatus: 'success',
         loading: false,
         disabled: false,
-        fileInputRef: createRef<HTMLInputElement>(),
         onSelect,
         onOpenSelected: vi.fn(),
-        onUpload: vi.fn(),
+        onAddJD,
         onRetry: vi.fn(),
       }));
     });
@@ -68,5 +68,11 @@ describe('Pipeline JD custom select interactions', () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith('jd-generated');
     expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+
+    const addButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Thêm JD'));
+    expect(addButton).toBeTruthy();
+    expect(host.querySelector('input[type="file"]')).toBeNull();
+    await act(async () => addButton?.click());
+    expect(onAddJD).toHaveBeenCalledTimes(1);
   });
 });

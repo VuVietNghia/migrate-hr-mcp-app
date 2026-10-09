@@ -13,20 +13,14 @@ import {
   FileTextOutlined,
   LoadingOutlined,
   PauseCircleOutlined,
+  PlusOutlined,
   RightOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import type { CVFile, ProcessingStatus } from '../pipeline-service';
-import {
-  classifyCompanyDocument,
-  describeCompanyDocumentFormat,
-  type CompanyDocument,
-} from '../company/company-documents';
-import { CompanyDocxPreview } from '../company/CompanyDocxPreview';
-import { CompanyMarkdownPreview } from '../company/CompanyMarkdownPreview';
-import { CompanyPdfPreview } from '../company/CompanyPdfPreview';
 import { getCvPipelineDisplayReason } from '../cv-pipeline-display-reason';
 import { StudioCard, StudioInlineState, StudioPageHeader } from '../studio/StudioPrimitives';
+export { JDDocumentPreview as PipelineJDPreview } from '../jd-document/JDDocumentPreview';
 import {
   canOpenSavedCandidateBoard,
   getQueueSelectionState,
@@ -44,27 +38,6 @@ export function PipelinePageHeader() {
       description="Đối chiếu hồ sơ với Job Description, chấm điểm và lưu ứng viên theo một luồng liền mạch."
     />
   );
-}
-
-interface PipelineJDPreviewProps {
-  fileName: string;
-  text?: string;
-  blob?: Blob | null;
-  loading?: boolean;
-  error?: string;
-}
-
-export function PipelineJDPreview({ fileName, text = '', blob, loading = false, error }: PipelineJDPreviewProps) {
-  if (loading) return <StudioInlineState tone="info">Đang dựng bản xem trước JD…</StudioInlineState>;
-  if (error) return <StudioInlineState tone="danger">{error}</StudioInlineState>;
-
-  const document: CompanyDocument = { id: 'jd-preview', name: fileName };
-  const format = describeCompanyDocumentFormat(document);
-  if (format.id === 'markdown') return <CompanyMarkdownPreview content={text} />;
-  if (classifyCompanyDocument(document) === 'text') return <pre className="company-text-preview">{text}</pre>;
-  if (format.id === 'word' && blob) return <CompanyDocxPreview blob={blob} />;
-  if (format.id === 'pdf' && blob) return <CompanyPdfPreview blob={blob} />;
-  return <StudioInlineState tone="danger">Không có bản xem trước cho định dạng JD này.</StudioInlineState>;
 }
 
 interface PipelineFlowStripProps {
@@ -104,10 +77,9 @@ interface PipelineJDPanelProps {
   loadError?: string;
   loading: boolean;
   disabled: boolean;
-  fileInputRef: FileInputRef;
   onSelect: (fileId: string) => void;
   onOpenSelected: () => void;
-  onUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  onAddJD: () => void;
   onRetry: () => void;
 }
 
@@ -276,10 +248,9 @@ export function PipelineJDPanel({
   loadError,
   loading,
   disabled,
-  fileInputRef,
   onSelect,
   onOpenSelected,
-  onUpload,
+  onAddJD,
   onRetry,
 }: PipelineJDPanelProps) {
   const selected = jds.find(jd => jd.name === selectedName);
@@ -314,20 +285,13 @@ export function PipelineJDPanel({
         <label id="pipeline-jd-select-label" htmlFor="pipeline-jd-select">Chọn JD có sẵn</label>
         <button
           type="button"
-          className="studio-button studio-button--secondary studio-button--compact"
-          onClick={() => fileInputRef.current?.click()}
+          className="studio-button studio-button--secondary pipeline-studio-add-jd"
+          onClick={onAddJD}
           disabled={disabled || loading}
         >
-          <UploadOutlined aria-hidden="true" /> Tải JD
+          <PlusOutlined aria-hidden="true" /> Thêm JD
         </button>
       </div>
-      <input
-        ref={fileInputRef}
-        className="studio-sr-only"
-        type="file"
-        onChange={onUpload}
-        accept=".md,.txt,.pdf,.doc,.docx"
-      />
       <PipelineJDSelect
         regularJDs={regularJDs}
         generatedJDs={generatedJDs}

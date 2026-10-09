@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyInviteSentToBoard,
   applyInviteSentToBoards,
   buildInviteSentMessage,
   moveInvitedCVToPendingStage,
@@ -155,5 +156,26 @@ describe('applyInviteSentToBoards', () => {
 
     expect(next[0].cvs[0].status).toBe('05_Moi_Phong_Van');
     expect(next[0].cvs[0].inviteMailSent).toBe(true);
+  });
+});
+
+describe('applyInviteSentToBoard', () => {
+  it('updates only the source campaign when another board has the same item id', () => {
+    const first = boardsFixture()[0];
+    const second: CVBoardData = {
+      ...first,
+      listId: 'list-2',
+      listName: 'Frontend Dev',
+      cvs: [{ _id: 'cv-1', name: 'Nguyen Van A', status: '05_Moi_Phong_Van' }],
+    };
+
+    const next = applyInviteSentToBoard(second, 'cv-1', [{ _id: 'sent', value: true }], {
+      status: 'moved',
+      stageId: 'stage-7',
+    });
+
+    expect(next.cvs[0].inviteMailSent).toBe(true);
+    expect(next.cvs[0].status).toBe('07_Chua_Phong_Van');
+    expect(first.cvs[0].inviteMailSent).toBeUndefined();
   });
 });

@@ -44,6 +44,7 @@ const canonicalJd = `# TUYỂN DỤNG: BACKEND DEVELOPER
 describe('parseRecruitmentJob', () => {
   it('keeps the PrivOS file identity while parsing the canonical JD document', () => {
     expect(parseRecruitmentJob({ _id: 'file-1', name: 'JD_BACKEND_DEVELOPER.md', downloadUrl: '/files/1' }, canonicalJd)).toEqual({
+      kind: 'structured',
       fileId: 'file-1',
       fileName: 'JD_BACKEND_DEVELOPER.md',
       downloadUrl: '/files/1',
@@ -133,18 +134,21 @@ describe('buildRecruitmentJobDocument', () => {
 describe('filterRecruitmentJobs', () => {
   const jobs: RecruitmentJob[] = [
     {
+      kind: 'structured',
       fileId: 'job-1', fileName: 'JD_KE_TOAN.md', title: 'Kế toán tổng hợp',
       departmentKey: 'finance', departmentLabel: 'Tài chính', location: 'Hà Nội',
       employmentType: 'Full-time', salary: '', summary: 'Kiểm soát sổ sách', description: '',
       requirements: '', benefits: '', contactEmail: '', emailSubject: '',
     },
     {
+      kind: 'structured',
       fileId: 'job-2', fileName: 'JD_KE_TOAN_REMOTE.md', title: 'Kế toán tổng hợp',
       departmentKey: 'finance', departmentLabel: 'Tài chính', location: 'Remote',
       employmentType: 'Part-time', salary: '', summary: 'Đối soát báo cáo', description: '',
       requirements: '', benefits: '', contactEmail: '', emailSubject: '',
     },
     {
+      kind: 'structured',
       fileId: 'job-3', fileName: 'JD_BACKEND.md', title: 'Backend Developer',
       departmentKey: 'it', departmentLabel: 'IT', location: 'Đà Nẵng',
       employmentType: 'Full-time', salary: '', summary: 'Xây API', description: '',
@@ -163,6 +167,7 @@ describe('filterRecruitmentJobs', () => {
 
 describe('paginateRecruitmentJobs', () => {
   const jobs = Array.from({ length: 7 }, (_, index) => ({
+    kind: 'structured',
     fileId: `job-${index + 1}`,
   })) as RecruitmentJob[];
 
@@ -171,7 +176,7 @@ describe('paginateRecruitmentJobs', () => {
     const result = typeof paginate === 'function' ? paginate(jobs, 99, false) : undefined;
 
     expect(result).toEqual({
-      jobs: [{ fileId: 'job-7' }],
+      jobs: [{ kind: 'structured', fileId: 'job-7' }],
       page: 1,
       pageCount: 2,
     });
@@ -182,7 +187,11 @@ describe('paginateRecruitmentJobs', () => {
     const result = typeof paginate === 'function' ? paginate(jobs, 1, true) : undefined;
 
     expect(result).toEqual({
-      jobs: [{ fileId: 'job-4' }, { fileId: 'job-5' }, { fileId: 'job-6' }],
+      jobs: [
+        { kind: 'structured', fileId: 'job-4' },
+        { kind: 'structured', fileId: 'job-5' },
+        { kind: 'structured', fileId: 'job-6' },
+      ],
       page: 1,
       pageCount: 3,
     });

@@ -45,7 +45,6 @@ const asCompanyDocument = (file: CVFile): CompanyDocument => ({
 export interface IPipelineService {
   fetchAvailableFiles(): Promise<CVFile[]>;
   uploadCV(file: File): Promise<CVFile>;
-  uploadJD?(file: File): Promise<CVFile>;
   deleteFile?(fileId: string): Promise<void>;
   processCV(
     cv: CVFile,
@@ -75,7 +74,7 @@ interface PipelineDashboardProps {
   active?: boolean;
   navigationIntent?: StudioNavigationIntent | null;
   onNavigate?: (
-    tab: 'cvScored',
+    tab: 'cvScored' | 'recruitment',
     context?: Pick<StudioNavigationIntent, 'screening'>,
   ) => void;
 }
@@ -94,7 +93,6 @@ export default function PipelineDashboard({
   const { roomId } = usePrivosContext();
   const jdDocumentRepository = useMemo(() => new CompanyDocumentRepository(app, roomId), [app, roomId]);
   const serviceRef = useRef<IPipelineService | null>(null);
-  const jdInputRef = useRef<HTMLInputElement>(null);
   const cvInputRef = useRef<HTMLInputElement>(null);
   const deleteArmTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -412,24 +410,6 @@ export default function PipelineDashboard({
     }
   };
 
-  const handleUploadJD = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !serviceRef.current?.uploadJD) return;
-    setJdLoading(true);
-    try {
-      const uploaded = await serviceRef.current.uploadJD(file);
-      const refreshed = await loadJDs();
-      const selected = refreshed.find(jd => jd._id === uploaded._id || jd.name === uploaded.name);
-      if (selected) await handleSelectJD(selected._id, refreshed);
-      showToast(`Đã tải JD: ${uploaded.name}`);
-    } catch (err) {
-      showToast(`Lỗi tải JD: ${err instanceof Error ? err.message : String(err)}`, 'error');
-    } finally {
-      setJdLoading(false);
-      event.target.value = '';
-    }
-  };
-
   const armDeleteCV = useCallback((fileId: string) => {
     if (deleteArmTimerRef.current) window.clearTimeout(deleteArmTimerRef.current);
     setPendingDeleteId(fileId);
@@ -642,10 +622,9 @@ export default function PipelineDashboard({
           loadError={jdLoadError}
           loading={jdLoading}
           disabled={processing}
-          fileInputRef={jdInputRef}
           onSelect={fileId => void handleSelectJD(fileId)}
           onOpenSelected={() => void handleOpenJdModal()}
-          onUpload={event => void handleUploadJD(event)}
+          onAddJD={() => onNavigate?.('recruitment')}
           onRetry={() => { if (selectedJD) void loadJdContent(selectedJD.name, selectedJD._id); }}
         />
         <PipelineCVQueue

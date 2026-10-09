@@ -1,7 +1,7 @@
-import type { CVProfile } from './CVScoredTab';
+import type { CVProfile } from './candidate-model';
 
 /** Các field hiển thị trên thẻ, so bằng ===. customFields là mảng/object nên so riêng. */
-const COMPARED_FIELDS = ['status', 'name', 'score', 'category', 'reason', 'email', 'sdt', 'inviteMailSent'] as const;
+const COMPARED_FIELDS = ['status', 'name', 'score', 'category', 'reason', 'email', 'sdt', 'position', 'inviteMailSent'] as const;
 
 /**
  * Hai danh sách thẻ giống nhau về mọi thứ người dùng thấy và mọi thứ luồng gửi mail mời ghi lại

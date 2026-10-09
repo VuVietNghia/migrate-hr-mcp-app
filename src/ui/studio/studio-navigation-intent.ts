@@ -10,23 +10,29 @@ export interface StudioScreeningReference {
   listName: string;
 }
 
+export interface StudioLifecycleIntent {
+  openCreateForm: true;
+}
+
 export interface StudioNavigationIntent {
   sequence: number;
   target: AppTab;
   jd?: StudioJDReference;
   screening?: StudioScreeningReference;
+  lifecycle?: StudioLifecycleIntent;
 }
 
 export function nextStudioNavigationIntent(
   previous: StudioNavigationIntent | null,
   target: AppTab,
-  context?: Pick<StudioNavigationIntent, 'jd' | 'screening'>,
+  context?: Pick<StudioNavigationIntent, 'jd' | 'screening' | 'lifecycle'>,
 ): StudioNavigationIntent {
   return {
     sequence: (previous?.sequence ?? 0) + 1,
     target,
     ...(context?.jd ? { jd: context.jd } : {}),
     ...(context?.screening ? { screening: context.screening } : {}),
+    ...(context?.lifecycle ? { lifecycle: context.lifecycle } : {}),
   };
 }
 

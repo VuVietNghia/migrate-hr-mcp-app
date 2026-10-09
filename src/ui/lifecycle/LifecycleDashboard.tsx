@@ -12,6 +12,7 @@ import { ProfileListView } from './components/ProfileListView';
 import { CreateDetailedProfileForm } from './components/CreateDetailedProfileForm';
 import { usePolling } from '../hooks/usePolling';
 import '../hr-premium-styles.css';
+import type { StudioNavigationIntent } from '../studio/studio-navigation-intent';
 
 function areCandidatesEqual(prev: PassedCandidate[], next: PassedCandidate[]): boolean {
   if (prev.length !== next.length) return false;
@@ -46,7 +47,7 @@ function areProfilesEqual(prev: EmployeeProfile[], next: EmployeeProfile[]): boo
   });
 }
 
-function LifecycleContent({ active }: { active: boolean }) {
+function LifecycleContent({ active, navigationIntent }: { active: boolean; navigationIntent?: StudioNavigationIntent | null }) {
   console.log('[LifecycleDashboard] LifecycleContent mounted');
   const { roomId } = usePrivosContext();
   const service = useLifecycleService();
@@ -64,6 +65,14 @@ function LifecycleContent({ active }: { active: boolean }) {
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   const isRefreshingProfilesRef = useRef(false);
   const isRefreshingCandidatesRef = useRef(false);
+  const handledNavigationSequenceRef = useRef(0);
+
+  useEffect(() => {
+    if (!active || navigationIntent?.target !== 'lifecycle' || !navigationIntent.lifecycle?.openCreateForm) return;
+    if (handledNavigationSequenceRef.current >= navigationIntent.sequence) return;
+    handledNavigationSequenceRef.current = navigationIntent.sequence;
+    setIsCreating(true);
+  }, [active, navigationIntent?.sequence]);
 
   const refreshCandidates = useCallback(async (isSilent = false) => {
     if (!roomId || isRefreshingCandidatesRef.current) return;
@@ -372,9 +381,10 @@ export interface LifecycleDashboardProps {
   emailTemplateRepository?: ActiveTemplateRepository;
   /** True only while this tab is the visible one — polling is gated on it. */
   active?: boolean;
+  navigationIntent?: StudioNavigationIntent | null;
 }
 
-export default function LifecycleDashboard({ emailTemplateRepository, active = false }: LifecycleDashboardProps = {}) {
+export default function LifecycleDashboard({ emailTemplateRepository, active = false, navigationIntent = null }: LifecycleDashboardProps = {}) {
   console.log('[LifecycleDashboard] Default export mounted');
   const app = usePrivosApp();
   const { roomId } = usePrivosContext();
@@ -405,7 +415,7 @@ export default function LifecycleDashboard({ emailTemplateRepository, active = f
   return (
     <LifecycleServiceProvider service={service}>
       <EmployeeEmailTemplateProvider repository={resolvedEmailTemplateRepository}>
-        <LifecycleContent active={active} />
+        <LifecycleContent active={active} navigationIntent={navigationIntent} />
       </EmployeeEmailTemplateProvider>
     </LifecycleServiceProvider>
   );

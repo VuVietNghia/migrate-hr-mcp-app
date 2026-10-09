@@ -1,4 +1,4 @@
-import type { CVProfile } from './CVScoredTab';
+import type { CVProfile } from './candidate-model';
 import { wasInviteMailSent } from './invite-mail-persistence';
 
 export interface MappedBoardCVs {
@@ -23,7 +23,7 @@ export function mapItemsToCVProfiles(
   const sMap: Record<string, string> = { ...stagesMap };
 
   const cvs: CVProfile[] = items.map((item: any) => {
-    let score, category, reason, email, sdt;
+    let score, category, reason, email, sdt, position;
     const inviteMailSent = wasInviteMailSent(item.customFields);
     if (Array.isArray(item.customFields)) {
       item.customFields.forEach((cf: any) => {
@@ -34,6 +34,7 @@ export function mapItemsToCVProfiles(
         else if (fieldName.includes('lý do') || fieldName.includes('ly_do') || fieldName.includes('nhận xét')) reason = cf.value;
         else if (fieldName.includes('email') || fieldName.includes('thu_dien_tu')) email = cf.value;
         else if (fieldName.includes('sdt') || fieldName.includes('sđt') || fieldName.includes('phone') || fieldName.includes('điện thoại')) sdt = cf.value;
+        else if (fieldName.includes('nhóm nghề') || fieldName.includes('nhom nghe') || fieldName.includes('vị trí') || fieldName.includes('vi tri')) position = cf.value;
       });
     } else if (item.customFields && typeof item.customFields === 'object') {
       Object.keys(item.customFields).forEach(key => {
@@ -44,6 +45,7 @@ export function mapItemsToCVProfiles(
         else if (fieldName.includes('lý do') || fieldName.includes('ly_do') || fieldName.includes('nhận xét')) reason = val;
         else if (fieldName.includes('email') || fieldName.includes('thu_dien_tu')) email = val;
         else if (fieldName.includes('sdt') || fieldName.includes('sđt') || fieldName.includes('phone') || fieldName.includes('điện thoại')) sdt = val;
+        else if (fieldName.includes('nhóm nghề') || fieldName.includes('nhom nghe') || fieldName.includes('vị trí') || fieldName.includes('vi tri')) position = val;
       });
     }
 
@@ -91,6 +93,7 @@ export function mapItemsToCVProfiles(
       reason,
       email: email || '',
       sdt: sdt || '',
+      position: position ? String(position) : undefined,
       customFields: item.customFields,
       inviteMailSent,
     };

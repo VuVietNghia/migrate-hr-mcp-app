@@ -7,9 +7,10 @@ import {
 } from '../src/ui/studio/studio-navigation';
 
 describe('Studio navigation model', () => {
-  it('mounts data-heavy recruitment tabs when the app starts', () => {
+  it('mounts data-heavy recruitment tabs and Email when the app starts', () => {
     expect([...createInitialMountedTabs()]).toEqual([
       'home',
+      'email',
       'recruitment',
       'pipeline',
       'cvScored',

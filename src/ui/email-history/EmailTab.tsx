@@ -91,7 +91,7 @@ export default function EmailTab({ active }: EmailTabProps) {
   }, [roomId]);
 
   const refresh = useCallback(async (showLoading = false) => {
-    if (!active || !service || !roomId) return;
+    if (!service || !roomId) return;
     const requestId = ++requestRef.current;
     if (showLoading) setLoading(true);
 
@@ -110,12 +110,11 @@ export default function EmailTab({ active }: EmailTabProps) {
     } finally {
       if (showLoading && requestId === requestRef.current) setLoading(false);
     }
-  }, [active, roomId, service]);
+  }, [roomId, service]);
 
   useEffect(() => {
-    if (!active) return;
     void refresh(!hasLoadedRef.current);
-  }, [active, refresh]);
+  }, [refresh]);
 
   usePolling(
     () => refresh(false),

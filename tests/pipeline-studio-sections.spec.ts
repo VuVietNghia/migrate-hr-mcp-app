@@ -45,22 +45,22 @@ describe('Pipeline Studio sections', () => {
     expect(html).toContain('is-active');
   });
 
-  it('uses the selected JD summary as the viewer trigger and only offers file upload', () => {
+  it('uses the selected JD summary as the viewer trigger and routes adding a JD', () => {
     const html = renderToStaticMarkup(createElement(PipelineJDPanel, {
       jds: [cv('jd-1', 'JD Frontend.md')],
       selectedName: 'JD Frontend.md',
       loadStatus: 'success',
       loading: false,
       disabled: false,
-      fileInputRef: createRef<HTMLInputElement>(),
       onSelect: vi.fn(),
       onOpenSelected: vi.fn(),
-      onUpload: vi.fn(),
+      onAddJD: vi.fn(),
       onRetry: vi.fn(),
     }));
 
     expect(html).toContain('aria-label="Mở nội dung JD JD Frontend.md"');
-    expect(html).toContain('Tải JD');
+    expect(html).toContain('Thêm JD');
+    expect(html).not.toContain('input type="file"');
     expect(html).not.toContain('Xem JD');
     expect(html).not.toContain('Chỉnh với AI');
     expect(html).not.toContain('Tạo bằng form');
@@ -76,10 +76,9 @@ describe('Pipeline Studio sections', () => {
       loadStatus,
       loading: false,
       disabled: false,
-      fileInputRef: createRef<HTMLInputElement>(),
       onSelect: vi.fn(),
       onOpenSelected: vi.fn(),
-      onUpload: vi.fn(),
+      onAddJD: vi.fn(),
       onRetry: vi.fn(),
     }));
 
@@ -103,10 +102,9 @@ describe('Pipeline Studio sections', () => {
       loadStatus: 'success',
       loading: false,
       disabled: false,
-      fileInputRef: createRef<HTMLInputElement>(),
       onSelect: vi.fn(),
       onOpenSelected: vi.fn(),
-      onUpload: vi.fn(),
+      onAddJD: vi.fn(),
       onRetry: vi.fn(),
     }));
 
