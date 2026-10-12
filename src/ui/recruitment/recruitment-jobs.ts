@@ -88,6 +88,18 @@ function fieldValue(content: string, labels: string[]): string {
   return '';
 }
 
+function metadataValue(content: string, label: string): string {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = content.match(new RegExp(`<!--\\s*${escaped}:\\s*([^\\r\\n]*?)\\s*-->`, 'iu'));
+  return match?.[1]?.trim() ?? '';
+}
+
+function metadataBlockValue(content: string, label: string): string {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = content.match(new RegExp(`<!--\\s*${escaped}:\\s*([\\s\\S]*?)\\s*-->`, 'iu'));
+  return match?.[1]?.trim() ?? '';
+}
+
 function sectionBody(content: string, heading: string): string {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = content.match(new RegExp(`^#{2,3}\\s*(?:\\d+\\.\\s*)?${escaped}\\s*\\r?\\n([\\s\\S]*?)(?=^#{2,3}\\s|^\\*{3}\\s*$|(?![\\s\\S]))`, 'im'));
@@ -117,7 +129,7 @@ export function isStructuredRecruitmentJDFileName(name: string): boolean {
 export function parseRecruitmentJob(file: CVFile, content: string): StructuredRecruitmentJob | null {
   if (!isStructuredRecruitmentJDFileName(file.name)) return null;
   const title = firstMatch(content, [
-    /^#\s+(?:THÔNG TIN\s+)?TUYỂN DỤNG:\s*(.*)$/im,
+    /^#\s+(?:(?:THÔNG\s+TIN|TIN)\s+)?TUYỂN\s+DỤNG\s*:\s*(.*)$/im,
     /^#\s+(.*)$/m,
   ]) || boldListValue(content, 'Vị trí');
   if (!title) return null;
@@ -134,7 +146,7 @@ export function parseRecruitmentJob(file: CVFile, content: string): StructuredRe
     sectionBody(content, 'Yêu cầu'),
     sectionBody(content, 'Điểm cộng'),
   ].filter(Boolean);
-  const description = sectionBody(content, 'Mô tả công việc');
+  const description = metadataBlockValue(content, 'JD_DESCRIPTION') || sectionBody(content, 'Mô tả công việc');
 
   return {
     kind: 'structured',
@@ -144,12 +156,11 @@ export function parseRecruitmentJob(file: CVFile, content: string): StructuredRe
     title,
     departmentKey: department.key,
     departmentLabel: department.label,
-    location: fieldValue(content, ['Địa điểm làm việc', 'Địa điểm']) || 'Không xác định',
-    employmentType: fieldValue(content, ['Thời gian làm việc', 'Hình thức làm việc', 'Hình thức']) || 'Thỏa thuận',
-    salary: fieldValue(content, ['Mức lương', 'Thu nhập']) || 'Thỏa thuận',
-    summary: firstMatch(content, [/<!--\s*SUMMARY:\s*(.*?)\s*-->/i])
+    location: metadataValue(content, 'JD_LOCATION') || fieldValue(content, ['Địa điểm làm việc', 'Địa điểm']) || 'Không xác định',
+    employmentType: metadataValue(content, 'JD_EMPLOYMENT_TYPE') || fieldValue(content, ['Thời gian làm việc', 'Hình thức làm việc', 'Hình thức']) || 'Thỏa thuận',
+    salary: metadataValue(content, 'JD_SALARY') || fieldValue(content, ['Mức lương', 'Thu nhập']) || 'Thỏa thuận',
+    summary: metadataValue(content, 'SUMMARY')
       || fieldValue(content, ['Mô tả ngắn', 'Tóm tắt'])
-      || description.split('\n')[0]
       || '',
     description,
     requirements: [...modernRequirements, ...legacyRequirements].join('\n'),

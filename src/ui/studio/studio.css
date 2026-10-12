@@ -2949,7 +2949,9 @@
 .jd-studio-message--user { flex-direction: row-reverse; }
 .jd-studio-message p { max-width: 84%; margin: 0; padding: 11px 13px; border-radius: 4px 14px 14px; background: var(--studio-surface-subtle); font-size: .76rem; line-height: 1.55; white-space: pre-wrap; }
 .jd-studio-message--user p { border-radius: 14px 4px 14px 14px; color: var(--studio-text); background: var(--studio-accent-soft); }
-.jd-studio-message-avatar { display: inline-grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: 50%; color: var(--studio-accent); background: var(--studio-accent-soft); font-size: .52rem; font-weight: 750; }
+.jd-studio-message-avatar { display: inline-grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid color-mix(in srgb, var(--studio-accent) 24%, var(--studio-border)); border-radius: 50%; color: var(--studio-accent); background: var(--studio-accent-soft); }
+.jd-studio-message-avatar svg { width: 16px; height: 16px; }
+.jd-studio-message--user .jd-studio-message-avatar { color: var(--studio-text-secondary); background: var(--studio-surface-subtle); }
 
 .jd-studio-assistant-footer { display: grid; gap: 10px; padding: 16px; border-top: 1px solid var(--studio-border-subtle); }
 .jd-studio-assistant-footer .jd-chatbot-company-option { margin: 0; color: var(--studio-text-muted); font-size: .7rem; }
@@ -3012,14 +3014,17 @@
 .jd-studio-document-empty h3,
 .jd-studio-document-empty p { margin: 0; }
 .jd-studio-empty-icon { color: var(--studio-accent); font-size: 2rem; }
-.jd-studio-manual-editor { width: 100%; min-height: 100%; resize: none; border: 0; outline: 0; color: var(--studio-text); background: transparent; font: .82rem/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.jd-studio-manual-editor { width: 100%; min-height: 100%; border: 1px solid transparent; border-radius: var(--studio-radius-sm); outline: 0; color: var(--studio-text); background: transparent; cursor: text; }
+.jd-studio-manual-editor:focus-visible { border-color: color-mix(in srgb, var(--studio-accent) 56%, var(--studio-border)); box-shadow: var(--studio-focus); }
+.jd-studio-manual-editor[aria-disabled=true] { cursor: default; opacity: .68; }
+.jd-studio-manual-editor .company-markdown-preview { min-height: 100%; cursor: text; }
 
 .jd-studio-change-view { display: grid; gap: 18px; }
-.jd-studio-change-view pre { margin: 0; overflow: visible; white-space: pre-wrap; color: var(--studio-text); font: .82rem/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; }
-.jd-studio-change-row { display: block; min-height: 1.75em; padding: 0 12px; border-left: 2px solid transparent; }
-.jd-studio-change-row.is-changed {
-  border-left-color: var(--studio-success);
+.jd-studio-change-preview { min-width: 0; }
+.jd-studio-change-block.is-changed {
+  border-radius: 4px;
   background: var(--studio-success-soft);
+  box-shadow: inset 3px 0 0 var(--studio-success);
 }
 .jd-studio-no-changes { margin: 0; color: var(--studio-text-muted); }
 .jd-studio-document-card > .studio-inline-state { margin: 0 18px 14px; }

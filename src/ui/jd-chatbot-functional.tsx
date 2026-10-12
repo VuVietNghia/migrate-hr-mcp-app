@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import { usePrivosApp, usePrivosContext } from '@privos_ai/app-react';
 import { MarkdownPathContextBuilder } from './cv-context-builder';
 import { buildCompactJDChatHistory } from './jd-chat-history';
@@ -34,6 +35,14 @@ const hello: Message = {
   content: 'Chào bạn! Tôi là trợ lí AI giúp bạn tạo và chỉnh sửa JD. Bạn cần tôi giúp gì ạ?',
 };
 const EDITABLE_JD_FILE = /\.md$/i;
+
+function JDChatMessageAvatar({ role }: { role: Message['role'] }) {
+  return (
+    <span className="jd-studio-message-avatar" aria-hidden="true">
+      {role === 'ai' ? <RobotOutlined /> : <UserOutlined />}
+    </span>
+  );
+}
 
 function extractJDPositionName(text: string, content: string) {
   const positionTag = text.match(/<position_name>\s*([\s\S]*?)\s*<\/position_name>/i)?.[1]?.trim();
@@ -312,7 +321,7 @@ export default function JDChatbotFunctional({ navigationIntent = null }: JDChatb
         }
         const generatedName = formatGeneratedJDName(positionName);
         const normalizedContent = positionName
-          ? prepareCreatedJD(content, positionName, selectedDepartment)
+          ? prepareCreatedJD(content, positionName, selectedDepartment, interpreted.metadata)
           : applyJDDepartment(content, selectedDepartment);
         setDocumentDepartment(selectedDepartment);
         setDraft(normalizedContent);
@@ -446,13 +455,13 @@ export default function JDChatbotFunctional({ navigationIntent = null }: JDChatb
           <div ref={chatMessagesRef} className="jd-studio-messages">
             {messages.map((message, index) => (
               <div key={index} className={`jd-studio-message jd-studio-message--${message.role}`}>
-                <span className="jd-studio-message-avatar" aria-hidden="true">{message.role === 'ai' ? 'AI' : 'BẠN'}</span>
+                <JDChatMessageAvatar role={message.role} />
                 <p>{message.role === 'ai' ? renderChatMessage(message.content) : message.content}</p>
               </div>
             ))}
             {busy ? (
               <div className="jd-studio-message jd-studio-message--ai" role="status">
-                <span className="jd-studio-message-avatar" aria-hidden="true">AI</span>
+                <JDChatMessageAvatar role="ai" />
                 <p>AI đang suy nghĩ…</p>
               </div>
             ) : null}

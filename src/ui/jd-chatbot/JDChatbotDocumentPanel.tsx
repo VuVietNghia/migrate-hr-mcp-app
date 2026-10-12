@@ -1,10 +1,11 @@
 import { CompanyMarkdownPreview } from '../company/CompanyMarkdownPreview';
 import {
-  buildJDChangeRows,
+  getChangedJDLineIndexes,
   JD_DOCUMENT_MODES,
   type JDDocumentMode,
 } from '../jd-chatbot-view-model';
 import { StudioInlineState } from '../studio/StudioPrimitives';
+import { JDRichMarkdownEditor } from './JDRichMarkdownEditor';
 
 type SaveMessage = { type: 'success' | 'error'; text: string } | null;
 
@@ -47,8 +48,7 @@ export function JDChatbotDocumentPanel({
 }: JDChatbotDocumentPanelProps) {
   const changed = draft !== saved;
   const canSave = Boolean(fileName && draft.trim() && changed && !loading && !isSaving);
-  const rows = mode === 'changes' ? buildJDChangeRows(saved, draft) : [];
-  const hasChangedRows = rows.some((row) => row.changed);
+  const changedLineIndexes = mode === 'changes' ? getChangedJDLineIndexes(saved, draft) : undefined;
 
   return (
     <section className="jd-studio-document-card" aria-label="Nội dung JD">
@@ -79,30 +79,23 @@ export function JDChatbotDocumentPanel({
         ) : !draft ? (
           <div className="jd-studio-document-empty">
             <span className="jd-studio-empty-icon" aria-hidden="true">✦</span>
-            <h3>JD tiếp theo bắt đầu từ đây.</h3>
+            <h3>Nội dung JD sẽ hiển thị ở đây.</h3>
             <p>Chọn một JD có sẵn hoặc trao đổi với trợ lý để tạo bản mô tả mới.</p>
             <button type="button" className="studio-button studio-button--small" onClick={onOpenLibrary}>Mở thư viện JD</button>
           </div>
         ) : mode === 'manual' ? (
-          <textarea
-            className="jd-studio-manual-editor"
-            aria-label="Chỉnh sửa nội dung JD"
+          <JDRichMarkdownEditor
             value={draft}
-            onChange={(event) => onDraftChange(event.target.value)}
             disabled={loading || isSaving}
+            onChange={onDraftChange}
           />
         ) : mode === 'changes' ? (
           <div className="jd-studio-change-view">
-            <StudioInlineState tone="success">Các dòng được thêm hoặc thay đổi có nền xanh.</StudioInlineState>
-            {!hasChangedRows ? <p className="jd-studio-no-changes">Nội dung hiện tại khớp với bản đã lưu.</p> : null}
-            <pre aria-label="Các thay đổi trong JD">
-              {rows.map((row) => (
-                <span key={row.index} className={`jd-studio-change-row${row.changed ? ' is-changed' : ''}`}>
-                  {row.text || '\u00a0'}
-                  {'\n'}
-                </span>
-              ))}
-            </pre>
+            <StudioInlineState tone="success">Các phần được AI thêm hoặc chỉnh sửa được tô nền xanh.</StudioInlineState>
+            {!changed ? <p className="jd-studio-no-changes">Nội dung hiện tại khớp với bản đã lưu.</p> : null}
+            <div className="jd-studio-change-preview">
+              <CompanyMarkdownPreview content={draft} highlightedLineIndexes={changedLineIndexes} />
+            </div>
           </div>
         ) : (
           <CompanyMarkdownPreview content={draft} />

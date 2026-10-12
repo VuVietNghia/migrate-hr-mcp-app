@@ -35,13 +35,51 @@ describe('AI-created JD department normalization', () => {
     expect(normalized).not.toContain('Marketing');
   });
 
-  it('injects a canonical recruitment title when the AI payload has no H1', () => {
+  it('injects only the position name when the AI payload has no H1', () => {
     const content = `## 1. Thông Tin Chung
 - **Vị trí:** Kỹ sư dữ liệu
 - **Phòng ban:** Khác`;
 
     expect(prepareCreatedJD(content, 'Kỹ sư dữ liệu', { key: 'it', label: 'IT' })).toMatch(
-      /^# THÔNG TIN TUYỂN DỤNG: KỸ SƯ DỮ LIỆU\n\n<!-- DEPARTMENT_ID: it -->/,
+      /^# Kỹ sư dữ liệu\n\n<!-- DEPARTMENT_ID: it -->/,
     );
+  });
+
+  it('replaces an AI recruitment-label H1 with only the position name', () => {
+    const content = `# TIN TUYỂN DỤNG: LẬP TRÌNH VIÊN MOBILE
+
+## Mô tả công việc
+- Phát triển ứng dụng di động`;
+
+    const normalized = prepareCreatedJD(
+      content,
+      'Lập trình viên Mobile',
+      { key: 'it', label: 'IT' },
+    );
+
+    expect(normalized).toMatch(/^# Lập trình viên Mobile\n\n<!-- DEPARTMENT_ID: it -->/);
+    expect(normalized).not.toContain('TIN TUYỂN DỤNG');
+  });
+
+  it('stores AI display metadata as hidden comments without changing the visible JD layout', () => {
+    const normalized = prepareCreatedJD(
+      '# Blockchain Developer\n\nNội dung JD do AI tự trình bày.',
+      'Blockchain Developer',
+      { key: 'it', label: 'IT' },
+      {
+        location: 'TP. Hồ Chí Minh',
+        employmentType: 'Hybrid',
+        salary: '25–35 triệu',
+        summary: 'Phát triển nền tảng blockchain cho khách hàng doanh nghiệp.',
+        description: 'Phát triển smart contract\nTối ưu hiệu năng hệ thống',
+      },
+    );
+
+    expect(normalized).toContain('<!-- JD_LOCATION: TP. Hồ Chí Minh -->');
+    expect(normalized).toContain('<!-- JD_EMPLOYMENT_TYPE: Hybrid -->');
+    expect(normalized).toContain('<!-- JD_SALARY: 25–35 triệu -->');
+    expect(normalized).toContain('<!-- SUMMARY: Phát triển nền tảng blockchain cho khách hàng doanh nghiệp. -->');
+    expect(normalized).toContain('<!-- JD_DESCRIPTION:\nPhát triển smart contract\nTối ưu hiệu năng hệ thống\n-->');
+    expect(normalized).toContain('Nội dung JD do AI tự trình bày.');
   });
 });

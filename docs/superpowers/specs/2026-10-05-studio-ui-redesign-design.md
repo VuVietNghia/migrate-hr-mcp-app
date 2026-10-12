@@ -4,7 +4,7 @@ Ngày: 2026-10-05. Không commit theo quy ước của repository.
 
 ## 0. Trạng thái bàn giao
 
-Cập nhật gần nhất: 2026-10-08. Phần dưới đây là trạng thái triển khai thực tế để phiên làm việc tiếp theo tiếp tục từ đúng điểm dừng; các mục thiết kế còn lại trong tài liệu vẫn giữ nguyên hiệu lực.
+Cập nhật gần nhất: 2026-10-12. Phần dưới đây là trạng thái triển khai thực tế để phiên làm việc tiếp theo tiếp tục từ đúng điểm dừng; các mục thiết kế còn lại trong tài liệu vẫn giữ nguyên hiệu lực.
 
 ### 0.1. Đã hoàn thành và đã được người dùng nghiệm thu
 
@@ -14,7 +14,7 @@ Cập nhật gần nhất: 2026-10-08. Phần dưới đây là trạng thái tr
 - Đã triển khai sidebar theo nhóm chức năng, topbar, breadcrumb, mobile navigation và vùng nội dung responsive trong iframe.
 - Sidebar vẫn cuộn được nhưng không hiển thị thanh scrollbar.
 - Navigation đã hiển thị tab **Lương & thanh toán** theo quyền hiện có.
-- Nhãn điều hướng **CV đã chấm** đã đổi thành **Ứng viên**. Đây mới là thay đổi nhãn/route; phần thiết kế nghiệp vụ một Kanban theo đợt ở mục 5 chưa hoàn tất.
+- Nhãn điều hướng **CV đã chấm** đã đổi thành **Ứng viên**; màn hình Ứng viên và thiết kế nghiệp vụ theo đợt tại mục 5 hiện cũng đã hoàn tất.
 - Không đưa thanh PROTOTYPE, persona, dữ liệu Aster Studio hoặc dữ liệu giả của preview vào production.
 
 Các file nền tảng chính:
@@ -142,21 +142,83 @@ Các module chính của trang và phần tích hợp liên quan:
 - src/manifest.ts
 - src/relay-transport.ts
 
+#### Trang Ứng viên
+
+Trang này đã hoàn tất redesign trước khi bắt đầu trang `Trợ lý JD` và được người dùng xác nhận là màn hình đã làm xong.
+
+- Đã chuyển sang Studio layout với header, metrics, tìm kiếm, bộ lọc và hai chế độ Kanban/list dùng dữ liệu thật.
+- Selector đợt tuyển dụng hỗ trợ một đợt cụ thể hoặc `Tất cả đợt tuyển dụng`; thứ tự đợt dùng thời điểm tạo, giữ selection hiện tại và ưu tiên navigation intent hợp lệ từ Pipeline.
+- Khi chọn một đợt, chỉ đợt đó được tải đầy đủ; chế độ tất cả đợt tải các list có quyền đọc, cô lập lỗi từng list và giữ ứng viên có cùng item id ở hai đợt thành hai hồ sơ ứng tuyển riêng biệt.
+- Search không phân biệt dấu trên tên, email, vị trí và đợt tuyển dụng; metrics và filter chỉ tính trên scope đang chọn.
+- Kanban/list hiển thị đúng tên đợt, vị trí và phòng ban từ JD liên kết. JD `.md`, `.docx` và `.pdf` do người dùng tải lên lấy phòng ban từ App Database thay vì suy đoán từ tên file.
+- Modal chi tiết dùng dữ liệu ứng viên và tiêu chí đánh giá thật, giữ luồng đổi stage, gửi thư mời phỏng vấn và mở form vòng đời nhân sự hiện có.
+
+Các module chính của trang:
+
+- src/ui/cv-scored/CVScoredTab.tsx
+- src/ui/cv-scored/CandidateStudioViews.tsx
+- src/ui/cv-scored/CandidateStudioSelect.tsx
+- src/ui/cv-scored/CandidateDetailDialog.tsx
+- src/ui/cv-scored/candidate-selection-state.ts
+- src/ui/cv-scored/candidate-board-flow.ts
+- src/ui/cv-scored/candidate-view-model.ts
+- src/ui/cv-scored/candidate-recruitment-jobs.ts
+
+#### Trang Trợ lý JD
+
+Trang này đã hoàn tất redesign theo `ui-ux-preview`, được build lại vào Docker, kiểm tra trực tiếp trên PrivOS bằng Chrome và được người dùng xác nhận **ok** qua các vòng tinh chỉnh.
+
+- Đã thay giao diện cũ bằng Studio layout hai vùng cao theo viewport: khung chat AI bên trái và nội dung JD bên phải. Cả hai vùng dùng scrollbar mảnh, màu semantic và chỉ cuộn nội dung bên trong.
+- Header có các action `Thư viện JD`, `Tạo mới` và `Lưu thay đổi`. Thư viện JD mở bằng dialog; không có chức năng tải file `.md` từ trang Trợ lý JD theo quyết định của người dùng.
+- Khung chat dùng avatar icon robot cho AI và icon người cho user; đã bỏ chữ `AI` màu xanh cạnh tiêu đề `Trợ lý AI`.
+- Composer là input một dòng cố định, placeholder vừa khung, focus bao toàn bộ control và nút gửi là icon mũi tên nằm sát trong khung. Nhấn Enter hoặc icon đều dùng cùng luồng gửi hiện có.
+- Khi tạo JD mới, dropdown phòng ban là bắt buộc và chặn gửi cho đến khi chọn. JD được lưu vào `Room Files/hr-miniapp/jds` với phòng ban đã chọn và xuất hiện trong đúng phòng ban tại tab `Vị trí tuyển dụng`.
+- AI chỉ tạo JD khi đã có đủ vị trí, địa điểm, hình thức làm việc, mức lương và yêu cầu/kinh nghiệm. Hình thức làm việc là trường bắt buộc, chấp nhận cách diễn đạt như Full-time, Part-time, Intern/Thực tập, Remote, Hybrid hoặc Contract; nếu thiếu, AI phải hỏi lại thay vì tự suy đoán.
+- Khi AI hỏi bổ sung thông tin, `<jd_content>NULL</jd_content>` được coi là không có tài liệu mới: preview đang có không bị thay đổi, chữ `NULL` không xuất hiện và chat không hiển thị thông báo sai rằng JD đã được tạo hoặc đã xuất hiện bên phải.
+- Phản hồi AI được chuẩn hóa để không lặp lời chào, lời xác nhận hoàn tất hoặc câu hỏi chỉnh sửa. Giao diện tự tạo đúng một thông báo ngắn: tạo mới thì báo đã tạo, chỉnh JD có sẵn thì báo đã cập nhật.
+- JD mới tạo mặc định mở `Xem trước`; chỉ khi AI sửa một JD đã có mới mặc định mở `Xem thay đổi`.
+- Ba chế độ nội dung theo đúng thứ tự `Xem trước`, `Xem thay đổi`, `Chỉnh sửa thủ công`. `Xem thay đổi` render cùng typography với preview, chỉ tô nền xanh các block do AI thêm/sửa và đã bỏ phần `Chi tiết thay đổi`.
+- `Chỉnh sửa thủ công` là một cột, trình bày giống preview nhưng dùng rich `contenteditable`; người dùng có thể sửa trực tiếp heading, đoạn văn và danh sách. Metadata ẩn của JD được giữ lại khi chuyển nội dung đã sửa về Markdown.
+- Nút `Lưu thay đổi` và `Khôi phục chỉnh sửa` cập nhật ngay trong lúc gõ, không cần click ra ngoài editor. Đã sửa lỗi React render lại Markdown sau mỗi ký tự làm mất nội dung/con trỏ hoặc treo app khi gõ liên tục.
+- JD do AI tạo có tiêu đề H1 chỉ là tên vị trí, không thêm `TIN TUYỂN DỤNG`, `Tin tuyển dụng:` hoặc biến thể tương tự. Tên card ở `Vị trí tuyển dụng` cũng chỉ hiển thị tên vị trí.
+- Khi tạo mới, AI trả thêm metadata độc lập cho địa điểm, hình thức, lương, tổng quan và mô tả. Trước khi lưu, giao diện ghi các giá trị này vào comment ẩn ổn định: `DEPARTMENT_ID`, `JD_LOCATION`, `JD_EMPLOYMENT_TYPE`, `JD_SALARY`, `SUMMARY` và `JD_DESCRIPTION`.
+- Parser của `Vị trí tuyển dụng` ưu tiên metadata mới, sau đó mới fallback sang field/section Markdown. Nhờ đó card và modal chi tiết hiển thị đúng địa điểm, hình thức, lương, tổng quan và mô tả mà không ép nội dung JD theo một bố cục Markdown duy nhất.
+- JD cũ không có metadata vẫn giữ hành vi tương thích: parser thử đọc nội dung hiện có; nếu không có tổng quan thì modal tiếp tục hiển thị `Chưa cập nhật`.
+
+Các module chính của trang và phần tích hợp liên quan:
+
+- src/ui/jd-chatbot-functional.tsx
+- src/ui/jd-chatbot-view-model.ts
+- src/ui/jd-chatbot-prompt.ts
+- src/ui/jd-chatbot-department.ts
+- src/ui/jd-chatbot-interaction-controls.tsx
+- src/ui/jd-chatbot/JDChatbotDocumentPanel.tsx
+- src/ui/jd-chatbot/JDRichMarkdownEditor.tsx
+- src/ui/jd-chatbot/jd-rich-editor-markdown.ts
+- src/ui/company/CompanyMarkdownPreview.tsx
+- src/ui/recruitment/recruitment-jobs.ts
+- src/ui/studio/studio.css
+
 ### 0.2. Kiểm thử và triển khai gần nhất
 
-Kết quả xác minh gần nhất ngày 2026-10-08:
+Kết quả xác minh gần nhất ngày 2026-10-12:
+
+- Regression test tập trung cho preview Markdown, Studio view, rich editor và tích hợp phản hồi AI đạt **22/22 test**.
+- `npm run typecheck:strict-unused`: đạt.
+- `npm run build`: đạt với 2303 module; Vite build và manifest lint hợp lệ.
+- Image `privos-mcp-app-demo:local` đã được build lại với id `sha256:2954cecc05283c8505b7c5bd68b16bd672ea2920431ebaac7d6e7965657feb16`; container `hr-app` đang chạy đúng image này và Docker healthcheck ở trạng thái `healthy`.
+- Đã smoke-test trực tiếp bằng Chrome tại app PrivOS: mở một JD có sẵn, chuyển sang `Chỉnh sửa thủ công`, nhập liên tục chuỗi 13 ký tự; toàn bộ chuỗi được giữ, editor còn focus, bộ đếm tăng đúng 13 và hai nút Lưu/Khôi phục bật ngay. Chuỗi kiểm thử không được lưu.
+
+Kết quả xác minh trước đó vẫn còn hiệu lực cho các màn hình đã nghiệm thu:
 
 - Các suite liên quan Pipeline status/dropdown đạt 14/14 test; các test view-model, wiring, parse text, điều hướng sang Ứng viên và relay manifest cũng đạt trong các lần xác minh theo phạm vi.
-- `npm run typecheck:strict-unused`: đạt.
-- `npm run build`: đạt với 2281 module; Vite build và manifest lint hợp lệ.
-- Đã build lại image `privos-mcp-app-demo:local` và recreate service `hr-app`; Docker healthcheck hiện ở trạng thái `healthy`.
 - Endpoint `/health` và `/ready` đều trả HTTP 200. `descriptor.manifest` được tạo từ `privos-app.json`, vì vậy lỗi app server không báo manifest và trạng thái `MANIFEST_DRIFT` cũ không còn là blocker hiện tại.
 - Người dùng đã kiểm tra trực tiếp trên PrivOS các vòng sửa của trang `Vị trí tuyển dụng` và `Sàng lọc CV`, gồm custom JD dropdown, trạng thái nạp JD và điều hướng sang đúng bảng ứng viên, sau đó xác nhận **ok**.
 
-Full `npm test` hiện còn đúng 4 lỗi nền, không phát sinh từ Studio Shell, trang Công ty, trang Vị trí tuyển dụng hoặc Pipeline:
+Full `npm test` hiện còn đúng 3 lỗi nền, không phát sinh từ Studio Shell, trang Công ty, trang Vị trí tuyển dụng, Pipeline, Ứng viên hoặc Trợ lý JD:
 
 1. Hai lỗi tests/manifest.spec.ts do identity/package sau lần pull chưa đồng bộ.
-2. Hai lỗi tests/packaging.spec.ts vì môi trường Windows hiện tại không có /bin/bash.
+2. Một lỗi tests/packaging.spec.ts vì lệnh đóng gói Bash trả mã 127 trên môi trường Windows hiện tại.
 
 Các test liên quan đã được bổ sung:
 
@@ -187,22 +249,34 @@ Các test liên quan đã được bổ sung:
 - tests/parsed-cv-text.spec.ts
 - tests/cv-scored-navigation-render.spec.ts
 - tests/relay-manifest-reporting.spec.ts
+- tests/candidate-selection-state.spec.ts
+- tests/candidate-board-flow.spec.ts
+- tests/candidate-view-model.spec.ts
+- tests/candidate-studio-views.spec.ts
+- tests/candidate-detail-dialog.spec.ts
+- tests/candidate-recruitment-jobs.spec.ts
+- tests/jd-chatbot-view-model.spec.ts
+- tests/jd-chatbot-studio-view.spec.ts
+- tests/jd-chatbot-rich-editor.spec.ts
+- tests/jd-chatbot-response.spec.ts
+- tests/jd-chatbot-response-integration.spec.ts
+- tests/jd-chatbot-prompt.spec.ts
+- tests/jd-chatbot-functional.spec.ts
+- tests/jd-chatbot-department.spec.ts
 
 ### 0.3. Chưa hoàn thành
 
-- Chưa redesign các feature screen theo thứ tự còn lại: Ứng viên, Trợ lý JD, Nhân sự/Vòng đời nhân sự, Bảng lương, Email và Soạn thảo.
-- Trang **Ứng viên** đã preload dữ liệu khi app mở và nhận intent để mở đúng screening list từ Pipeline, nhưng chưa thực hiện đầy đủ selector đợt tuyển dụng, newest-by-creation-time, chỉ tải/poll một list đang chọn và chỉ hiển thị một Kanban. Không được coi phần tích hợp này là hoàn thành mục 5 hoặc 6.4.
-- src/ui/cv-scored/cv-list-presence.ts vẫn ưu tiên updatedAt/updated_at; logic này chưa đáp ứng quy tắc creation time trong mục 5.1 và phải được sửa khi bắt đầu trang Ứng viên.
-- Navigation intent cho JD từ `Vị trí tuyển dụng` sang Pipeline/Trợ lý JD và screening reference từ Pipeline sang `Ứng viên` đã hoạt động. Intent cho `candidateId` và luồng từ Ứng viên sang Nhân sự chưa được triển khai.
-- Full verification gate chưa xanh vì bốn lỗi môi trường/cấu hình đã ghi tại mục 0.2.
+- Chưa redesign các feature screen theo thứ tự còn lại: Nhân sự/Vòng đời nhân sự, Bảng lương, Email và Soạn thảo.
+- Navigation intent cho JD từ `Vị trí tuyển dụng` sang Pipeline/Trợ lý JD và screening reference từ Pipeline sang `Ứng viên` đã hoạt động. Luồng hiện tại từ Ứng viên chỉ mở form tạo hồ sơ nhân sự có sẵn; việc truyền đầy đủ `candidateId` và dữ liệu nguồn sang màn hình Nhân sự vẫn thuộc phạm vi của màn hình tiếp theo.
+- Full verification gate chưa xanh vì ba lỗi môi trường/cấu hình đã ghi tại mục 0.2.
 
 ### 0.4. Điểm bắt đầu cho phiên tiếp theo
 
 1. Giữ nguyên toàn bộ worktree đang có; không reset hoặc ghi đè các thay đổi chưa commit.
 2. Không commit/push nếu người dùng chưa yêu cầu.
-3. Trang **Vị trí tuyển dụng** và **Pipeline / Sàng lọc CV** đã hoàn tất và đã nghiệm thu. Theo thứ tự tại mục 8, màn hình tiếp theo là **Ứng viên**, trừ khi người dùng chỉ định màn hình khác.
+3. Các trang **Dữ liệu công ty**, **Vị trí tuyển dụng**, **Pipeline / Sàng lọc CV**, **Ứng viên** và **Trợ lý JD** đã hoàn tất và đã nghiệm thu. Theo thứ tự tại mục 8, màn hình tiếp theo là **Nhân sự / Vòng đời nhân sự**, trừ khi người dùng chỉ định màn hình khác.
 4. Đọc lại ui-ux-preview và tài liệu privos-dev-docs cho feature chuẩn bị sửa; giữ nguyên service/repository và luồng nghiệp vụ đang chạy.
-5. Tái sử dụng Studio Shell, token, primitive, navigation intent và cơ chế preload hiện có; không làm mất contract chọn sẵn JD từ trang Vị trí tuyển dụng hoặc mở đúng screening list từ Pipeline.
+5. Tái sử dụng Studio Shell, token, primitive, navigation intent và cơ chế preload hiện có; không làm mất contract chọn sẵn JD từ trang Vị trí tuyển dụng, mở đúng screening list từ Pipeline hoặc metadata JD do AI tạo.
 6. Sau khi hoàn tất một trang, chạy test/typecheck/build phù hợp, triển khai để người dùng kiểm tra và dừng chờ xác nhận trước khi sang trang tiếp theo.
 
 ## 1. Mục tiêu
@@ -360,11 +434,11 @@ Tất cả text/control phải có độ tương phản đọc được; focus s
 
 ### 6.2. Tuyển dụng
 
-**Trạng thái:** giao diện và các luồng hiện có của trang đã hoàn thành redesign, được người dùng nghiệm thu ngày 2026-10-08; xem chi tiết triển khai tại mục 0.1. Context sang Ứng viên vẫn đi cùng giai đoạn triển khai màn hình Ứng viên.
+**Trạng thái:** giao diện và các luồng hiện có của trang đã hoàn thành redesign, được người dùng nghiệm thu ngày 2026-10-08; xem chi tiết triển khai tại mục 0.1. Context sang Ứng viên và Trợ lý JD hiện đã được các màn hình đích xử lý.
 
 - Metrics tổng quan, tìm kiếm và lọc theo phòng ban.
 - Danh sách vị trí/JD; tạo và chỉnh sửa theo luồng hiện có.
-- Điều hướng có JD context sang Pipeline và Trợ lý JD đã hoàn thành; context sang Ứng viên sẽ bổ sung cùng màn hình Ứng viên.
+- Điều hướng có JD context sang Pipeline và Trợ lý JD đã hoàn thành; Pipeline cũng mở đúng đợt tuyển dụng tương ứng trong tab Ứng viên.
 
 ### 6.3. Pipeline
 
@@ -373,19 +447,25 @@ Tất cả text/control phải có độ tương phản đọc được; focus s
 - Giữ nguyên luồng ingest/phân tích/chấm điểm hiện tại.
 - Trình bày lại tiến độ, bước đang chạy, kết quả và lỗi.
 - “Dừng sau tác vụ hiện tại” đặt cờ dừng và chỉ dừng tại ranh giới tác vụ an toàn; không hủy giữa một write đang thực hiện và không để trạng thái nửa chừng.
-- Điều hướng kết quả sang đúng screening list trong tab `Ứng viên` đã hoàn thành; phần redesign đầy đủ của tab `Ứng viên` vẫn thuộc bước 4.
+- Điều hướng kết quả sang đúng screening list trong tab `Ứng viên` đã hoàn thành; tab đích đã hoàn tất redesign và xử lý đúng một đợt hoặc tất cả đợt theo lựa chọn.
 
 ### 6.4. Ứng viên
 
+**Trạng thái:** đã hoàn thành redesign và được người dùng xác nhận trước khi bắt đầu trang Trợ lý JD; xem chi tiết triển khai tại mục 0.1.
+
 - Đổi nhãn `CV đã chấm` thành `Ứng viên` trên navigation, header và text liên quan.
-- Thực hiện toàn bộ thiết kế tại mục 5.
-- Bổ sung list view, search/filter, metrics và detail layout từ preview bằng dữ liệu thật.
+- Đã thực hiện selector theo creation time, scope một/tất cả đợt, guard request cũ và data isolation giữa các screening list.
+- Đã bổ sung Kanban/list view, search/filter, metrics và detail layout từ preview bằng dữ liệu thật.
 
 ### 6.5. Trợ lý JD
 
-- Giữ chat và thư viện JD hiện có.
-- Dùng bố cục hai vùng thư viện/nội dung.
-- Hỗ trợ xem trước, chỉnh sửa và tải xuống Markdown theo dữ liệu thật.
+**Trạng thái:** đã hoàn thành redesign, triển khai Docker, kiểm tra trực tiếp trên PrivOS và được người dùng nghiệm thu ngày 2026-10-12; xem chi tiết triển khai tại mục 0.1.
+
+- Giữ chat, thư viện JD, luồng đọc/lưu file thật và navigation intent hiện có trong Studio layout hai vùng.
+- Hỗ trợ `Xem trước`, `Xem thay đổi` và rich editor `Chỉnh sửa thủ công`; không cung cấp tải xuống Markdown tại màn hình này.
+- Tạo JD mới bắt buộc chọn phòng ban và bắt buộc AI thu thập đủ vị trí, địa điểm, hình thức làm việc, mức lương, yêu cầu/kinh nghiệm.
+- Lưu metadata ổn định để tab Vị trí tuyển dụng đọc đúng phòng ban, địa điểm, hình thức, lương, tổng quan và mô tả; vẫn tương thích JD cũ không có metadata.
+- Không thay preview khi AI chỉ hỏi bổ sung thông tin; tạo mới mở Xem trước, chỉnh JD đã có mở Xem thay đổi.
 
 ### 6.6. Nhân sự / Vòng đời nhân sự
 
@@ -428,7 +508,7 @@ Tất cả text/control phải có độ tương phản đọc được; focus s
 
 Thứ tự triển khai:
 
-Trạng thái ngày 2026-10-08: bước 1, 2 và 3 đã hoàn thành, đã triển khai và được người dùng nghiệm thu; bước 4 là điểm tiếp tục mặc định.
+Trạng thái ngày 2026-10-12: bước 1 đến 5 đã hoàn thành, đã triển khai và được người dùng nghiệm thu; bước 6 là điểm tiếp tục mặc định.
 
 1. Studio Shell + Công ty.
 2. Tuyển dụng.

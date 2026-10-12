@@ -5,6 +5,13 @@ type InterpretedResponse = {
   chatText: string;
   documentContent: string | null;
   nextMode: 'preview' | 'changes' | null;
+  metadata?: {
+    location?: string;
+    employmentType?: string;
+    salary?: string;
+    summary?: string;
+    description?: string;
+  };
 };
 
 const interpretJDAIResponse = (responseModel as typeof responseModel & {
@@ -42,6 +49,33 @@ describe('JD assistant AI response interpretation', () => {
       chatText: 'Đã cập nhật JD. Bạn có thể xem thay đổi ở bên phải.',
       documentContent: '# Frontend Developer\nĐịa điểm: Hà Nội',
       nextMode: 'changes',
+    });
+  });
+
+  it('extracts hidden display metadata without leaking it into the chat or document', () => {
+    expect(interpretJDAIResponse?.(
+      `<position_name>Blockchain Developer</position_name>
+<jd_location>TP. Hồ Chí Minh</jd_location>
+<jd_employment_type>Toàn thời gian</jd_employment_type>
+<jd_salary>25–35 triệu</jd_salary>
+<jd_summary>Xây dựng sản phẩm blockchain cho khách hàng doanh nghiệp.</jd_summary>
+<jd_description>Phát triển smart contract
+Tối ưu hiệu năng hệ thống</jd_description>
+<jd_content># Blockchain Developer
+
+Nội dung JD linh hoạt.</jd_content>`,
+      false,
+    )).toEqual({
+      chatText: 'Đã tạo JD cho vị trí Blockchain Developer. Nội dung được hiển thị ở bên phải.',
+      documentContent: '# Blockchain Developer\n\nNội dung JD linh hoạt.',
+      nextMode: 'preview',
+      metadata: {
+        location: 'TP. Hồ Chí Minh',
+        employmentType: 'Toàn thời gian',
+        salary: '25–35 triệu',
+        summary: 'Xây dựng sản phẩm blockchain cho khách hàng doanh nghiệp.',
+        description: 'Phát triển smart contract\nTối ưu hiệu năng hệ thống',
+      },
     });
   });
 });

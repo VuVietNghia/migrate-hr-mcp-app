@@ -39,7 +39,7 @@ describe('JD assistant controller integration', () => {
     expect(source).toContain('AppDbRecruitmentDepartmentStore');
     expect(source).toContain('const selectedDepartment = departments.find');
     expect(source).toContain('if (!activeFileName && !selectedDepartment)');
-    expect(source).toContain('prepareCreatedJD(content, positionName, selectedDepartment)');
+    expect(source).toContain('prepareCreatedJD(content, positionName, selectedDepartment, interpreted.metadata)');
     expect(source).toContain('department: selectedDepartment');
     expect(source).toContain('canSend={Boolean(activeFileName || selectedDepartment)}');
   });

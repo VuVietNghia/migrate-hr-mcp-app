@@ -70,20 +70,24 @@ describe('JD assistant Studio view', () => {
     expect(changes).toBeGreaterThan(preview);
     expect(manual).toBeGreaterThan(changes);
     expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain('Các dòng được thêm hoặc thay đổi có nền xanh.');
-    expect(html).toContain('jd-studio-change-row is-changed');
+    expect(html).toContain('Các phần được AI thêm hoặc chỉnh sửa được tô nền xanh.');
+    expect(html).not.toContain('Các dòng được thêm hoặc thay đổi có nền xanh.');
+    expect(html).toContain('jd-studio-change-preview');
+    expect(html).toContain('<h1>TUYỂN DỤNG: Frontend Developer</h1>');
+    expect(html).not.toContain('<h1 class="jd-studio-change-block is-changed">');
+    expect(html).toContain('<p class="jd-studio-change-block is-changed">Phòng ban: IT</p>');
+    expect(html).not.toContain('Chi tiết dòng thay đổi');
+    expect(html).not.toContain('jd-studio-change-details');
   });
 
-  it('renders Markdown in preview and a controlled textarea in manual mode', () => {
+  it('renders Markdown in preview and an editable formatted document in manual mode', () => {
     expect(renderPanel()).toContain('<h1>TUYỂN DỤNG: Frontend Developer</h1>');
 
     const manual = renderPanel({ mode: 'manual' });
-    expect(manual).toContain('<textarea');
-    /*
-    expect(manual).toContain('value="# TUYỂN DỤNG: Frontend Developer');
-    expect(manual).toContain('51 ký tự');
-    */
-    expect(manual).toContain('Frontend Developer');
+    expect(manual).toContain('contenteditable="true"');
+    expect(manual).toContain('role="textbox"');
+    expect(manual).toContain('<h1>TUYỂN DỤNG: Frontend Developer</h1>');
+    expect(manual).not.toContain('<textarea');
     expect(manual).toContain('47 k\u00fd t\u1ef1');
   });
 
@@ -91,7 +95,7 @@ describe('JD assistant Studio view', () => {
     const html = renderPanel({ fileName: null, draft: '', saved: '' });
 
     expect(html).toContain('Bản mô tả công việc mới');
-    expect(html).toContain('JD tiếp theo bắt đầu từ đây.');
+    expect(html).toContain('Nội dung JD sẽ hiển thị ở đây.');
     expect(html).toContain('Mở thư viện JD');
   });
 
@@ -183,7 +187,7 @@ describe('JD assistant Studio view', () => {
 
     expect(css).toMatch(/\.jd-studio-workspace\s*\{[^}]*grid-template-columns:\s*350px minmax\(0, 1fr\)/s);
     expect(css).toMatch(/\.jd-studio-workspace\s*\{[^}]*height:\s*calc\(100vh - 170px\)[^}]*min-height:\s*760px/s);
-    expect(css).toMatch(/\.jd-studio-change-row\.is-changed\s*\{[^}]*background:\s*var\(--studio-success-soft\)/s);
+    expect(css).toMatch(/\.jd-studio-change-block\.is-changed\s*\{[^}]*background:\s*var\(--studio-success-soft\)/s);
     expect(css).toMatch(/@media \(max-width:\s*1000px\)[\s\S]*?\.jd-studio-workspace\s*\{[^}]*grid-template-columns:\s*1fr/s);
     expect(css).toMatch(/@media \(max-width:\s*720px\)[\s\S]*?\.jd-studio-document-tabs/s);
   });

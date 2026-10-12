@@ -51,6 +51,22 @@ describe('structured recruitment JD filenames', () => {
 });
 
 describe('parseRecruitmentJob', () => {
+  it('removes the Tin tuyển dụng prefix from the displayed job title', () => {
+    const content = `# Tin tuyển dụng: Lập trình viên Mobile
+
+<!-- DEPARTMENT_ID: it -->
+
+## Mô tả công việc
+- Phát triển ứng dụng di động`;
+
+    expect(parseRecruitmentJob(
+      { _id: 'mobile-1', name: 'JD_AI_LapTrinhVienMobile.md' },
+      content,
+    )).toMatchObject({
+      title: 'Lập trình viên Mobile',
+    });
+  });
+
   it('keeps the PrivOS file identity while parsing the canonical JD document', () => {
     expect(parseRecruitmentJob({ _id: 'file-1', name: 'JD_BACKEND_DEVELOPER.md', downloadUrl: '/files/1' }, canonicalJd)).toEqual({
       kind: 'structured',
@@ -182,11 +198,35 @@ Phối hợp với nhóm phân tích để chuẩn hóa dữ liệu.
       location: 'Thành phố Hồ Chí Minh',
       employmentType: 'Hybrid',
       salary: '25 - 35 triệu',
-      summary: 'Xây dựng và vận hành nền tảng dữ liệu phục vụ các sản phẩm nội bộ.',
+      summary: '',
       description: [
         'Xây dựng và vận hành nền tảng dữ liệu phục vụ các sản phẩm nội bộ.',
         'Phối hợp với nhóm phân tích để chuẩn hóa dữ liệu.',
       ].join('\n'),
+    });
+  });
+
+  it('prefers hidden AI metadata while keeping the visible JD layout flexible', () => {
+    const aiJd = `# TUYỂN DỤNG: BLOCKCHAIN DEVELOPER
+
+<!-- DEPARTMENT_ID: it -->
+<!-- JD_LOCATION: TP. Hồ Chí Minh -->
+<!-- JD_EMPLOYMENT_TYPE: Hybrid -->
+<!-- JD_SALARY: 25–35 triệu -->
+<!-- SUMMARY: Phát triển nền tảng blockchain cho khách hàng doanh nghiệp. -->
+<!-- JD_DESCRIPTION:
+Phát triển smart contract
+Tối ưu hiệu năng hệ thống
+-->
+
+Nội dung JD có bố cục tự do.`;
+
+    expect(parseRecruitmentJob({ _id: 'ai-metadata', name: 'JD_AI_BlockchainDeveloper.md' }, aiJd)).toMatchObject({
+      location: 'TP. Hồ Chí Minh',
+      employmentType: 'Hybrid',
+      salary: '25–35 triệu',
+      summary: 'Phát triển nền tảng blockchain cho khách hàng doanh nghiệp.',
+      description: 'Phát triển smart contract\nTối ưu hiệu năng hệ thống',
     });
   });
 

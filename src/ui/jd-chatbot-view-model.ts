@@ -9,16 +9,39 @@ export interface InterpretedJDAIResponse {
   chatText: string;
   documentContent: string | null;
   nextMode: Extract<JDDocumentMode, 'preview' | 'changes'> | null;
+  metadata?: JDGeneratedMetadata;
+}
+
+export interface JDGeneratedMetadata {
+  location?: string;
+  employmentType?: string;
+  salary?: string;
+  summary?: string;
+  description?: string;
+}
+
+function taggedValue(text: string, tag: string): string | undefined {
+  const value = text.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'iu'))?.[1]?.trim();
+  return value || undefined;
 }
 
 export function interpretJDAIResponse(text: string, hasSelectedJD: boolean): InterpretedJDAIResponse {
   const taggedContent = text.match(/<jd_content>\s*([\s\S]*?)\s*<\/jd_content>/iu)?.[1]?.trim() || '';
   const documentContent = taggedContent && !EMPTY_JD_CONTENT.test(taggedContent) ? taggedContent : null;
   const positionName = text.match(/<position_name>\s*([\s\S]*?)\s*<\/position_name>/iu)?.[1]?.trim();
+  const metadata: JDGeneratedMetadata = {
+    location: taggedValue(text, 'jd_location'),
+    employmentType: taggedValue(text, 'jd_employment_type'),
+    salary: taggedValue(text, 'jd_salary'),
+    summary: taggedValue(text, 'jd_summary'),
+    description: taggedValue(text, 'jd_description'),
+  };
+  const hasMetadata = Object.values(metadata).some(Boolean);
   const cleanText = text
     .replace(/<jd_content>[\s\S]*?<\/jd_content>/giu, '')
     .replace(/<saved_file>[\s\S]*?<\/saved_file>/giu, '')
     .replace(/<position_name>[\s\S]*?<\/position_name>/giu, '')
+    .replace(/<jd_(?:location|employment_type|salary|summary|description)>[\s\S]*?<\/jd_(?:location|employment_type|salary|summary|description)>/giu, '')
     .replace(LEGACY_JD_COMPLETION_MESSAGE, '')
     .trim();
   const completionMessage = hasSelectedJD
@@ -31,6 +54,7 @@ export function interpretJDAIResponse(text: string, hasSelectedJD: boolean): Int
     chatText: documentContent ? completionMessage : cleanText,
     documentContent,
     nextMode: documentContent ? (hasSelectedJD ? 'changes' : 'preview') : null,
+    ...(documentContent && hasMetadata ? { metadata } : {}),
   };
 }
 

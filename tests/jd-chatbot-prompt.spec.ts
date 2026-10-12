@@ -11,11 +11,20 @@ describe('JD chatbot prompt contract', () => {
     });
 
     expect(prompt).toContain('Không thêm thông tin công ty vào JD.');
-    expect(prompt).toContain('Hỏi đến khi đủ Vị trí, Địa điểm, Mức lương, Yêu cầu/kinh nghiệm');
+    expect(prompt).toContain(
+      'Hỏi đến khi đủ Vị trí, Địa điểm, Hình thức làm việc, Mức lương, Yêu cầu/kinh nghiệm',
+    );
+    expect(prompt).toContain(
+      'Hình thức làm việc là bắt buộc; không được tự suy đoán và phải hỏi người dùng nếu thiếu.',
+    );
     expect(prompt).toContain('<jd_content>...</jd_content>');
     expect(prompt).toContain('Người dùng: Xin chào');
     expect(prompt).toContain('Phòng ban bắt buộc: IT (mã: it)');
     expect(prompt).toContain('không được tự đổi phòng ban');
+    expect(prompt).toContain('<jd_location>...</jd_location>');
+    expect(prompt).toContain('<jd_employment_type>...</jd_employment_type>');
+    expect(prompt).toContain('<jd_summary>...</jd_summary>');
+    expect(prompt).toContain('<jd_description>...</jd_description>');
   });
 
   it('includes read-only company guidance and the selected draft while editing', () => {

@@ -1,4 +1,5 @@
 import type { RecruitmentDepartment } from './recruitment-departments';
+import type { JDGeneratedMetadata } from './jd-chatbot-view-model';
 
 type JDDepartment = Pick<RecruitmentDepartment, 'key' | 'label'>;
 
@@ -49,10 +50,30 @@ export function prepareCreatedJD(
   content: string,
   positionName: string,
   department: JDDepartment,
+  metadata: JDGeneratedMetadata = {},
 ): string {
   const trimmed = content.trim();
-  const titled = /^#\s+\S/mu.test(trimmed)
-    ? trimmed
-    : `# THÔNG TIN TUYỂN DỤNG: ${positionName.trim().toLocaleUpperCase('vi')}\n\n${trimmed}`;
-  return applyJDDepartment(titled, department);
+  const title = positionName.trim();
+  const titled = /^#\s+\S[^\r\n]*(?:\r?\n|$)/u.test(trimmed)
+    ? trimmed.replace(/^#\s+[^\r\n]*(?=\r?\n|$)/u, `# ${title}`)
+    : `# ${title}\n\n${trimmed}`;
+  const normalized = applyJDDepartment(titled, department)
+    .replace(/\s*<!--\s*JD_(?:LOCATION|EMPLOYMENT_TYPE|SALARY):[^\r\n]*-->\s*/giu, '\n\n')
+    .replace(/\s*<!--\s*SUMMARY:[^\r\n]*-->\s*/giu, '\n\n')
+    .replace(/\s*<!--\s*JD_DESCRIPTION:[\s\S]*?-->\s*/giu, '\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const comments = [
+    metadata.location ? `<!-- JD_LOCATION: ${safeMetadata(metadata.location)} -->` : '',
+    metadata.employmentType ? `<!-- JD_EMPLOYMENT_TYPE: ${safeMetadata(metadata.employmentType)} -->` : '',
+    metadata.salary ? `<!-- JD_SALARY: ${safeMetadata(metadata.salary)} -->` : '',
+    metadata.summary ? `<!-- SUMMARY: ${safeMetadata(metadata.summary)} -->` : '',
+    metadata.description ? `<!-- JD_DESCRIPTION:\n${safeMetadata(metadata.description)}\n-->` : '',
+  ].filter(Boolean).join('\n');
+
+  if (!comments) return normalized;
+  return normalized.replace(
+    /(<!--\s*DEPARTMENT_ID:[^\r\n]*-->)/iu,
+    `$1\n${comments}`,
+  );
 }
