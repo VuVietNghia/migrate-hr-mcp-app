@@ -44,6 +44,7 @@ import {
   filterRecruitmentJobs,
   getInitialJobDepartmentKey,
   getRecruitmentEmptyState,
+  isStructuredRecruitmentJDFileName,
   paginateRecruitmentJobs,
   parseRecruitmentJob,
   type RecruitmentJob,
@@ -271,7 +272,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
 
   useEffect(() => {
     roomOperationRef.current = null;
-    if (!app || !roomId) {
+    if (!active || !app || !roomId) {
       setIsLoading(false);
       setCandidateMetricLoading(false);
       return;
@@ -319,7 +320,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
         const uploadedIds = new Set(uploadedMetadata.map((item) => item.fileId));
         const parsedJobs = (await Promise.all(files.map(async (file) => {
           if (uploadedIds.has(file._id)) return null;
-          if (!/^JD_(?!AI_)/i.test(file.name)) return null;
+          if (!isStructuredRecruitmentJDFileName(file.name)) return null;
           try {
             const content = await readRoomFileText(app, { _id: file._id, downloadUrl: file.downloadUrl });
             return content ? parseRecruitmentJob(file, content) : null;
@@ -351,7 +352,7 @@ export default function RecruitmentPanel({ active, onNavigate }: RecruitmentPane
       operation.cancel();
       if (roomOperationRef.current === operation) roomOperationRef.current = null;
     };
-  }, [app, roomId, reloadSequence]);
+  }, [app, roomId, reloadSequence, active]);
 
   const countsByDepartment = useMemo(() => {
     const counts = new Map<string, number>();

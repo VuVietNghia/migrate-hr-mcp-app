@@ -13,6 +13,13 @@ vi.mock('@privos_ai/app-react', () => ({
 import RecruitmentPanel, * as recruitmentPanelModule from '../src/ui/recruitment-panel';
 
 describe('Recruitment Studio page', () => {
+  it('reloads recruitment data when the mounted tab becomes active again', () => {
+    const source = readFileSync(resolve('src/ui/recruitment-panel.tsx'), 'utf8');
+
+    expect(source).toContain('if (!active || !app || !roomId)');
+    expect(source).toContain('}, [app, roomId, reloadSequence, active]);');
+  });
+
   it('renders the Studio recruitment hierarchy without preview data', () => {
     const html = renderToStaticMarkup(createElement(RecruitmentPanel, { onNavigate: vi.fn() }));
 

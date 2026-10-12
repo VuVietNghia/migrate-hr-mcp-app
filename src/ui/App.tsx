@@ -66,7 +66,7 @@ const TAB_SECTIONS: { id: SectionId; label: string; tabs: TabDef[] }[] = [
         scopes: ['files:read', 'files:write', 'lists:write', 'sandbox:ai-chat', 'sandbox:ai-chat:write'],
       },
       { id: 'cvScored', label: 'Ứng viên', scopes: ['lists:read', 'lists:write'] },
-      { id: 'chatbotJD', label: 'Chỉnh sửa JD', scopes: ['files:read', 'files:write'] },
+      { id: 'chatbotJD', label: 'Trợ lý JD', scopes: ['files:read', 'files:write'] },
     ],
   },
   {

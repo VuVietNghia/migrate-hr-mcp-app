@@ -4,6 +4,7 @@ import * as recruitmentJobsModule from '../src/ui/recruitment/recruitment-jobs';
 import {
   buildRecruitmentJobDocument,
   filterRecruitmentJobs,
+  isStructuredRecruitmentJDFileName,
   parseRecruitmentJob,
   type RecruitmentJob,
 } from '../src/ui/recruitment/recruitment-jobs';
@@ -41,7 +42,31 @@ const canonicalJd = `# TUYỂN DỤNG: BACKEND DEVELOPER
 * **Tiêu đề email:** _[Backend Developer]_
 `;
 
+describe('structured recruitment JD filenames', () => {
+  it('accepts both manual and AI-created Markdown JD names without accepting unrelated files', () => {
+    expect(isStructuredRecruitmentJDFileName('JD_BACKEND.md')).toBe(true);
+    expect(isStructuredRecruitmentJDFileName('JD_AI_BlockchainDeveloper.md')).toBe(true);
+    expect(isStructuredRecruitmentJDFileName('notes.md')).toBe(false);
+  });
+});
+
 describe('parseRecruitmentJob', () => {
+  it('removes the Tin tuyển dụng prefix from the displayed job title', () => {
+    const content = `# Tin tuyển dụng: Lập trình viên Mobile
+
+<!-- DEPARTMENT_ID: it -->
+
+## Mô tả công việc
+- Phát triển ứng dụng di động`;
+
+    expect(parseRecruitmentJob(
+      { _id: 'mobile-1', name: 'JD_AI_LapTrinhVienMobile.md' },
+      content,
+    )).toMatchObject({
+      title: 'Lập trình viên Mobile',
+    });
+  });
+
   it('keeps the PrivOS file identity while parsing the canonical JD document', () => {
     expect(parseRecruitmentJob({ _id: 'file-1', name: 'JD_BACKEND_DEVELOPER.md', downloadUrl: '/files/1' }, canonicalJd)).toEqual({
       kind: 'structured',
@@ -94,6 +119,114 @@ describe('parseRecruitmentJob', () => {
       description: 'Lên kế hoạch nội dung',
       requirements: 'Viết tốt\nBiết quay dựng',
       benefits: 'MacBook làm việc',
+    });
+  });
+
+  it('loads an AI-created JD as a structured job in its selected department', () => {
+    const aiJd = `# THÔNG TIN TUYỂN DỤNG: LẬP TRÌNH VIÊN BLOCKCHAIN
+
+<!-- DEPARTMENT_ID: it -->
+
+## 1. Thông Tin Chung
+- **Vị trí:** Lập trình viên Blockchain
+- **Phòng ban:** IT
+- **Địa điểm làm việc:** TP. Hồ Chí Minh
+- **Thời gian làm việc:** Toàn thời gian
+
+## 2. Mô Tả Công Việc
+- Phát triển smart contract
+
+## 3. Yêu Cầu Ứng Viên
+- **Kinh nghiệm:** 2 năm
+- **Kỹ năng chuyên môn:** Solidity
+
+## 4. Quyền Lợi
+- **Mức lương:** 22 - 32 triệu
+- Làm việc hybrid
+
+## 5. Cách Thức Ứng Tuyển
+- Gửi CV về email: hr@example.com
+- Tiêu đề email: Blockchain Developer - Họ tên`;
+
+    expect(parseRecruitmentJob({ _id: 'ai-1', name: 'JD_AI_BlockchainDeveloper.md' }, aiJd)).toMatchObject({
+      kind: 'structured',
+      fileId: 'ai-1',
+      title: 'LẬP TRÌNH VIÊN BLOCKCHAIN',
+      departmentKey: 'it',
+      departmentLabel: 'IT',
+      location: 'TP. Hồ Chí Minh',
+      employmentType: 'Toàn thời gian',
+      salary: '22 - 32 triệu',
+      description: 'Phát triển smart contract',
+      requirements: 'Kinh nghiệm: 2 năm\nKỹ năng chuyên môn: Solidity',
+    });
+  });
+
+  it('falls back to the canonical AI position field when an older AI JD has no H1', () => {
+    const aiJd = `<!-- DEPARTMENT_ID: it -->
+
+## 1. Thông Tin Chung
+- **Vị trí:** Kỹ sư dữ liệu
+- **Phòng ban:** IT
+- **Địa điểm làm việc:** Remote`;
+
+    expect(parseRecruitmentJob({ _id: 'ai-legacy', name: 'JD_AI_KySuDuLieu.md' }, aiJd)).toMatchObject({
+      title: 'Kỹ sư dữ liệu',
+      departmentKey: 'it',
+      departmentLabel: 'IT',
+      location: 'Remote',
+    });
+  });
+
+  it('parses standalone AI labels and prose descriptions without falling back to defaults', () => {
+    const aiJd = `# THÔNG TIN TUYỂN DỤNG: KỸ SƯ DỮ LIỆU
+
+<!-- DEPARTMENT_ID: it -->
+
+## Thông tin chung
+**Địa điểm:** Thành phố Hồ Chí Minh
+**Hình thức:** Hybrid
+**Mức lương:** 25 - 35 triệu
+
+## Mô tả công việc
+Xây dựng và vận hành nền tảng dữ liệu phục vụ các sản phẩm nội bộ.
+
+Phối hợp với nhóm phân tích để chuẩn hóa dữ liệu.
+`;
+
+    expect(parseRecruitmentJob({ _id: 'ai-prose', name: 'JD_AI_KySuDuLieu.md' }, aiJd)).toMatchObject({
+      location: 'Thành phố Hồ Chí Minh',
+      employmentType: 'Hybrid',
+      salary: '25 - 35 triệu',
+      summary: '',
+      description: [
+        'Xây dựng và vận hành nền tảng dữ liệu phục vụ các sản phẩm nội bộ.',
+        'Phối hợp với nhóm phân tích để chuẩn hóa dữ liệu.',
+      ].join('\n'),
+    });
+  });
+
+  it('prefers hidden AI metadata while keeping the visible JD layout flexible', () => {
+    const aiJd = `# TUYỂN DỤNG: BLOCKCHAIN DEVELOPER
+
+<!-- DEPARTMENT_ID: it -->
+<!-- JD_LOCATION: TP. Hồ Chí Minh -->
+<!-- JD_EMPLOYMENT_TYPE: Hybrid -->
+<!-- JD_SALARY: 25–35 triệu -->
+<!-- SUMMARY: Phát triển nền tảng blockchain cho khách hàng doanh nghiệp. -->
+<!-- JD_DESCRIPTION:
+Phát triển smart contract
+Tối ưu hiệu năng hệ thống
+-->
+
+Nội dung JD có bố cục tự do.`;
+
+    expect(parseRecruitmentJob({ _id: 'ai-metadata', name: 'JD_AI_BlockchainDeveloper.md' }, aiJd)).toMatchObject({
+      location: 'TP. Hồ Chí Minh',
+      employmentType: 'Hybrid',
+      salary: '25–35 triệu',
+      summary: 'Phát triển nền tảng blockchain cho khách hàng doanh nghiệp.',
+      description: 'Phát triển smart contract\nTối ưu hiệu năng hệ thống',
     });
   });
 

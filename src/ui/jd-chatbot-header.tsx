@@ -1,32 +1,44 @@
+import { StudioPageHeader } from './studio/StudioPrimitives';
+
 type JDChatbotHeaderProps = {
   busy: boolean;
+  canSave: boolean;
+  isSaving: boolean;
   onOpenLibrary: () => void;
   onCreateNew: () => void;
+  onSave: () => void;
 };
 
-export function JDChatbotHeader({ busy, onOpenLibrary, onCreateNew }: JDChatbotHeaderProps) {
+export function JDChatbotHeader({
+  busy,
+  canSave,
+  isSaving,
+  onOpenLibrary,
+  onCreateNew,
+  onSave,
+}: JDChatbotHeaderProps) {
   return (
-    <header className="jd-chatbot-page-header">
-      <div>
-        <h1>Chỉnh sửa JD</h1>
-        <p>Soạn, xem và tinh chỉnh JD cùng AI.</p>
-      </div>
-      <div className="jd-chatbot-header-actions">
-        <button
-          className="jd-chatbot-library-trigger"
-          onClick={onOpenLibrary}
-          disabled={busy}
-        >
-          Danh sách JD
+    <StudioPageHeader
+      className="jd-studio-page-header"
+      eyebrow="TUYỂN DỤNG"
+      title="Trợ lý JD"
+      description="Soạn và chỉnh sửa mô tả công việc cùng AI."
+      actions={<>
+        <button type="button" className="studio-button" onClick={onOpenLibrary} disabled={busy}>
+          Thư viện JD
+        </button>
+        <button type="button" className="studio-button" onClick={onCreateNew} disabled={busy}>
+          Tạo mới
         </button>
         <button
-          className="jd-chatbot-preview-badge"
-          onClick={onCreateNew}
-          disabled={busy}
+          type="button"
+          className="studio-button studio-button--primary"
+          onClick={onSave}
+          disabled={!canSave || busy || isSaving}
         >
-          Tạo JD mới
+          {isSaving ? 'Đang lưu…' : 'Lưu thay đổi'}
         </button>
-      </div>
-    </header>
+      </>}
+    />
   );
 }

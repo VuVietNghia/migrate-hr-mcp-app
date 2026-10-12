@@ -121,6 +121,17 @@ describe('recruitment department identifiers', () => {
 });
 
 describe('resolveJdDepartment', () => {
+  it('reads the bold list department emitted by the AI JD template', () => {
+    const content = `# THÔNG TIN TUYỂN DỤNG: BLOCKCHAIN
+
+<!-- DEPARTMENT_ID: it -->
+
+- **Phòng ban:** IT
+`;
+
+    expect(resolveJdDepartment(content)).toEqual({ key: 'it', label: 'IT' });
+  });
+
   it('uses stable metadata for a new JD while preserving its display label', () => {
     const content = `# TUYỂN DỤNG: KẾ TOÁN TỔNG HỢP
 
